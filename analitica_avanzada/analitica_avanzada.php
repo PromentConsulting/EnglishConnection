@@ -36,10 +36,16 @@ $filters = [
     'lowgradeonly' => $lowgradeonly,
 ];
 
-$metrics = local_analitica_avanzada_get_global_metrics();
-$userdata = local_analitica_avanzada_get_filtered_users($filters, $page, $perpage);
-$courses = local_analitica_avanzada_get_courses_for_filter();
-$resources = local_analitica_avanzada_get_top_resources(20, $courseid);
+$scope = local_analitica_avanzada_get_dashboard_scope();
+$courses = local_analitica_avanzada_get_courses_for_filter($scope);
+if (!empty($scope['restricted']) && !empty($courseid) && !array_key_exists($courseid, $courses)) {
+    $courseid = 0;
+    $filters['courseid'] = 0;
+}
+
+$metrics = local_analitica_avanzada_get_global_metrics($scope);
+$userdata = local_analitica_avanzada_get_filtered_users($filters, $page, $perpage, $scope);
+$resources = local_analitica_avanzada_get_top_resources(20, $courseid, $scope);
 
 $baseparams = [];
 if ($search !== '') {
@@ -77,6 +83,9 @@ echo html_writer::start_div('aa-hero');
 echo html_writer::tag('div', 'Dashboard personalizado Moodle', ['class' => 'aa-hero-kicker']);
 echo html_writer::tag('h1', 'Analítica Global', ['class' => 'aa-hero-title']);
 echo html_writer::tag('p', 'Visión global del rendimiento, progreso y uso de recursos de la plataforma.', ['class' => 'aa-hero-subtitle']);
+if (!empty($scope['restricted'])) {
+    echo html_writer::tag('p', 'Vista de profesor: las métricas y usuarios mostrados se limitan a los alumnos de los mismos grupos en los cursos en los que estás inscrito.', ['class' => 'aa-hero-subtitle']);
+}
 echo html_writer::tag(
     'div',
     'Las métricas de sesión y recursos se estiman con los logs de los últimos 30 días.',
@@ -205,6 +214,7 @@ echo html_writer::start_tag('thead');
 echo html_writer::tag('tr',
     html_writer::tag('th', 'Nombre') .
     html_writer::tag('th', 'Apellidos') .
+    html_writer::tag('th', 'Email') .
     html_writer::tag('th', 'Última conexión') .
     html_writer::tag('th', 'Calificación media') .
     html_writer::tag('th', '% progreso') .
@@ -225,6 +235,7 @@ if (!empty($userdata['users'])) {
         echo html_writer::start_tag('tr');
         echo html_writer::tag('td', $firstname);
         echo html_writer::tag('td', $lastname);
+        echo html_writer::tag('td', s($user->email));
         echo html_writer::tag('td', $lastaccess);
         echo html_writer::tag('td', html_writer::tag('span', local_analitica_avanzada_format_percent($user->avggrade), ['class' => $gradeclass]));
         echo html_writer::tag('td', html_writer::tag('span', local_analitica_avanzada_format_percent($user->progress), ['class' => $progressclass]));
@@ -233,7 +244,7 @@ if (!empty($userdata['users'])) {
         echo html_writer::end_tag('tr');
     }
 } else {
-    echo html_writer::tag('tr', html_writer::tag('td', 'No se han encontrado usuarios con los filtros aplicados.', ['colspan' => 7, 'class' => 'aa-empty-cell']));
+    echo html_writer::tag('tr', html_writer::tag('td', 'No se han encontrado usuarios con los filtros aplicados.', ['colspan' => 8, 'class' => 'aa-empty-cell']));
 }
 
 echo html_writer::end_tag('tbody');
