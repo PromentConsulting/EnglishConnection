@@ -46,6 +46,153 @@ function local_analitica_avanzada_user_can_view(?int $userid = null): bool {
     ]);
 }
 
+
+/**
+ * Dashboard visibility scope for current viewer.
+ */
+function local_analitica_avanzada_get_dashboard_scope(?int $userid = null): array {
+    global $USER, $DB;
+
+    static $cache = [];
+
+    if ($userid === null) {
+        $userid = $USER->id;
+    }
+
+    if (isset($cache[$userid])) {
+        return $cache[$userid];
+    }
+
+    $scope = [
+        'restricted' => false,
+        'viewerid' => $userid,
+        'courseids' => [],
+        'groupids' => [],
+        'userids' => [],
+    ];
+
+    if (is_siteadmin($userid) || has_capability('local/analitica_avanzada:view', context_system::instance(), $userid)) {
+        $cache[$userid] = $scope;
+        return $scope;
+    }
+
+    $rolesql = "SELECT DISTINCT ctx.instanceid AS courseid
+                  FROM {role_assignments} ra
+                  JOIN {context} ctx
+                    ON ctx.id = ra.contextid
+                   AND ctx.contextlevel = :contextlevel
+                  JOIN {role} r
+                    ON r.id = ra.roleid
+                 WHERE ra.userid = :userid
+                   AND (
+                        r.shortname IN ('teacher', 'editingteacher')
+                        OR r.archetype IN ('teacher', 'editingteacher')
+                   )";
+
+    $teachercourses = $DB->get_records_sql($rolesql, [
+        'contextlevel' => CONTEXT_COURSE,
+        'userid' => $userid,
+    ]);
+
+    if (empty($teachercourses)) {
+        $scope['restricted'] = true;
+        $cache[$userid] = $scope;
+        return $scope;
+    }
+
+    $courseids = array_map(static function($record) {
+        return (int) $record->courseid;
+    }, array_values($teachercourses));
+    [$courseinsql, $courseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'scpc');
+    $groupparams = $courseparams + ['groupuserid' => $userid];
+
+    $groupsql = "SELECT DISTINCT g.id, g.courseid
+                   FROM {groups} g
+                   JOIN {groups_members} gm
+                     ON gm.groupid = g.id
+                  WHERE gm.userid = :groupuserid
+                    AND g.courseid {$courseinsql}";
+
+    $grouprecords = $DB->get_records_sql($groupsql, $groupparams);
+    if (empty($grouprecords)) {
+        $scope['restricted'] = true;
+        $cache[$userid] = $scope;
+        return $scope;
+    }
+
+    $groupids = [];
+    $visiblecourseids = [];
+    foreach ($grouprecords as $grouprecord) {
+        $groupids[] = (int) $grouprecord->id;
+        $visiblecourseids[] = (int) $grouprecord->courseid;
+    }
+
+    $visiblecourseids = array_values(array_unique($visiblecourseids));
+    [$groupinsql, $groupparams] = $DB->get_in_or_equal($groupids, SQL_PARAMS_NAMED, 'scpg');
+    $userparams = $groupparams + [
+        'viewerid' => $userid,
+        'studentcontextlevel' => CONTEXT_COURSE,
+    ];
+
+    $usersql = "SELECT DISTINCT gm.userid
+                  FROM {groups_members} gm
+                  JOIN {groups} g
+                    ON g.id = gm.groupid
+                  JOIN {user} u
+                    ON u.id = gm.userid
+                  JOIN {user_enrolments} ue
+                    ON ue.userid = gm.userid
+                   AND ue.status = 0
+                  JOIN {enrol} e
+                    ON e.id = ue.enrolid
+                   AND e.status = 0
+                   AND e.courseid = g.courseid
+                  JOIN {context} ctx
+                    ON ctx.contextlevel = :studentcontextlevel
+                   AND ctx.instanceid = g.courseid
+                  JOIN {role_assignments} ra
+                    ON ra.userid = gm.userid
+                   AND ra.contextid = ctx.id
+                  JOIN {role} r
+                    ON r.id = ra.roleid
+                   AND (
+                        r.shortname = 'student'
+                        OR r.archetype = 'student'
+                   )
+                 WHERE gm.groupid {$groupinsql}
+                   AND gm.userid <> :viewerid
+                   AND " . local_analitica_avanzada_regular_user_sql('u');
+
+    $visibleusers = $DB->get_records_sql($usersql, $userparams);
+
+    $scope['restricted'] = true;
+    $scope['courseids'] = $visiblecourseids;
+    $scope['groupids'] = $groupids;
+    $scope['userids'] = array_map(static function($record) {
+        return (int) $record->userid;
+    }, array_values($visibleusers));
+
+    $cache[$userid] = $scope;
+    return $scope;
+}
+
+
+/**
+ * Apply scoped course filtering.
+ */
+function local_analitica_avanzada_get_scoped_course_ids(array $scope = null): array {
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
+    return !empty($scope['restricted']) ? array_values(array_unique($scope['courseids'] ?? [])) : [];
+}
+
+/**
+ * Apply scoped user filtering.
+ */
+function local_analitica_avanzada_get_scoped_user_ids(array $scope = null): array {
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
+    return !empty($scope['restricted']) ? array_values(array_unique($scope['userids'] ?? [])) : [];
+}
+
 /**
  * Format percent.
  */
@@ -80,8 +227,25 @@ function local_analitica_avanzada_format_duration(int $seconds): string {
 /**
  * Total regular users.
  */
-function local_analitica_avanzada_get_total_regular_users(): int {
+function local_analitica_avanzada_get_total_regular_users(array $scope = null): int {
     global $DB;
+
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
+    $userids = local_analitica_avanzada_get_scoped_user_ids($scope);
+
+    if (!empty($scope['restricted'])) {
+        if (empty($userids)) {
+            return 0;
+        }
+
+        [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'totalusr');
+        $sql = "SELECT COUNT(1)
+                  FROM {user} u
+                 WHERE " . local_analitica_avanzada_regular_user_sql('u') . "
+                   AND u.id {$insql}";
+
+        return (int) $DB->count_records_sql($sql, $params);
+    }
 
     $sql = "SELECT COUNT(1)
               FROM {user} u
@@ -93,9 +257,33 @@ function local_analitica_avanzada_get_total_regular_users(): int {
 /**
  * Global course completion rate.
  */
-function local_analitica_avanzada_get_global_completion_rate(): float {
+function local_analitica_avanzada_get_global_completion_rate(array $scope = null): float {
     global $DB;
 
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
+    $params = [];
+    $conditions = [
+        'ue.status = 0',
+        'e.status = 0',
+        'c.enablecompletion = 1',
+        local_analitica_avanzada_regular_user_sql('u'),
+    ];
+
+    if (!empty($scope['restricted'])) {
+        $userids = local_analitica_avanzada_get_scoped_user_ids($scope);
+        $courseids = local_analitica_avanzada_get_scoped_course_ids($scope);
+        if (empty($userids) || empty($courseids)) {
+            return 0.0;
+        }
+
+        [$userinsql, $userparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'cmpusr');
+        [$courseinsql, $courseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'cmpcrs');
+        $params = $userparams + $courseparams;
+        $conditions[] = "ue.userid {$userinsql}";
+        $conditions[] = "e.courseid {$courseinsql}";
+    }
+
+    $wheresql = implode(' AND ', $conditions);
     $totalsql = "SELECT COUNT(1)
                    FROM (
                         SELECT DISTINCT ue.userid, e.courseid
@@ -106,10 +294,7 @@ function local_analitica_avanzada_get_global_completion_rate(): float {
                             ON c.id = e.courseid
                           JOIN {user} u
                             ON u.id = ue.userid
-                         WHERE ue.status = 0
-                           AND e.status = 0
-                           AND c.enablecompletion = 1
-                           AND " . local_analitica_avanzada_regular_user_sql('u') . "
+                         WHERE {$wheresql}
                    ) pairs";
 
     $completedsql = "SELECT COUNT(1)
@@ -126,36 +311,49 @@ function local_analitica_avanzada_get_global_completion_rate(): float {
                                  ON cc.userid = ue.userid
                                 AND cc.course = e.courseid
                                 AND cc.timecompleted IS NOT NULL
-                              WHERE ue.status = 0
-                                AND e.status = 0
-                                AND c.enablecompletion = 1
-                                AND " . local_analitica_avanzada_regular_user_sql('u') . "
+                              WHERE {$wheresql}
                         ) completedpairs";
 
-    $total = (int) $DB->count_records_sql($totalsql);
+    $total = (int) $DB->count_records_sql($totalsql, $params);
     if ($total === 0) {
         return 0.0;
     }
 
-    $completed = (int) $DB->count_records_sql($completedsql);
+    $completed = (int) $DB->count_records_sql($completedsql, $params);
     return ($completed / $total) * 100;
 }
 
 /**
  * Average session time for all regular users, estimated from the last N days.
  */
-function local_analitica_avanzada_get_global_average_session_time(int $since): int {
+function local_analitica_avanzada_get_global_average_session_time(int $since, array $scope = null): int {
     global $DB;
 
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
     $params = ['since' => $since];
+    $conditions = [
+        'l.anonymous = 0',
+        'l.userid > 0',
+        'l.timecreated >= :since',
+        local_analitica_avanzada_regular_user_sql('u'),
+    ];
+
+    if (!empty($scope['restricted'])) {
+        $userids = local_analitica_avanzada_get_scoped_user_ids($scope);
+        if (empty($userids)) {
+            return 0;
+        }
+
+        [$insql, $userparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'sessusr');
+        $params += $userparams;
+        $conditions[] = "l.userid {$insql}";
+    }
+
     $sql = "SELECT l.userid, l.timecreated
               FROM {logstore_standard_log} l
               JOIN {user} u
                 ON u.id = l.userid
-             WHERE l.anonymous = 0
-               AND l.userid > 0
-               AND l.timecreated >= :since
-               AND " . local_analitica_avanzada_regular_user_sql('u') . "
+             WHERE " . implode(' AND ', $conditions) . "
           ORDER BY l.userid ASC, l.timecreated ASC";
 
     $rs = $DB->get_recordset_sql($sql, $params);
@@ -193,17 +391,59 @@ function local_analitica_avanzada_get_global_average_session_time(int $since): i
 /**
  * Global dashboard metrics.
  */
-function local_analitica_avanzada_get_global_metrics(): array {
+function local_analitica_avanzada_get_global_metrics(array $scope = null): array {
     global $DB;
 
-    $totalusers = local_analitica_avanzada_get_total_regular_users();
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
+    $userids = local_analitica_avanzada_get_scoped_user_ids($scope);
+    $courseids = local_analitica_avanzada_get_scoped_course_ids($scope);
+
+    if (!empty($scope['restricted']) && (empty($userids) || empty($courseids))) {
+        return [
+            'totalusers' => 0,
+            'inactivecount' => 0,
+            'inactivepct' => 0,
+            'lowgradecount' => 0,
+            'lowgradepct' => 0,
+            'completionrate' => 0,
+            'avgsession' => 0,
+        ];
+    }
+
+    $totalusers = local_analitica_avanzada_get_total_regular_users($scope);
     $inactivecutoff = time() - (7 * DAYSECS);
+
+    $inactiveparams = ['inactivecutoff' => $inactivecutoff];
+    $inactiveconditions = [
+        local_analitica_avanzada_regular_user_sql('u'),
+        '(u.lastaccess = 0 OR u.lastaccess < :inactivecutoff)',
+    ];
+
+    if (!empty($scope['restricted'])) {
+        [$inactiveinsql, $inactiveuserparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'inactiveusr');
+        $inactiveparams += $inactiveuserparams;
+        $inactiveconditions[] = "u.id {$inactiveinsql}";
+    }
 
     $inactivesql = "SELECT COUNT(1)
                       FROM {user} u
-                     WHERE " . local_analitica_avanzada_regular_user_sql('u') . "
-                       AND (u.lastaccess = 0 OR u.lastaccess < :inactivecutoff)";
-    $inactivecount = (int) $DB->count_records_sql($inactivesql, ['inactivecutoff' => $inactivecutoff]);
+                     WHERE " . implode(' AND ', $inactiveconditions);
+    $inactivecount = (int) $DB->count_records_sql($inactivesql, $inactiveparams);
+
+    $lowgradeparams = ['lowgrade' => 0.5];
+    $lowgradeconditions = [
+        "gi.itemtype = 'course'",
+        'gg.finalgrade IS NOT NULL',
+        local_analitica_avanzada_regular_user_sql('u'),
+    ];
+
+    if (!empty($scope['restricted'])) {
+        [$userinsql, $userparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'lowusr');
+        [$courseinsql, $courseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'lowcrs');
+        $lowgradeparams += $userparams + $courseparams;
+        $lowgradeconditions[] = "gg.userid {$userinsql}";
+        $lowgradeconditions[] = "gi.courseid {$courseinsql}";
+    }
 
     $lowgradesql = "SELECT COUNT(1)
                       FROM (
@@ -220,17 +460,14 @@ function local_analitica_avanzada_get_global_metrics(): array {
                                ON gi.id = gg.itemid
                              JOIN {user} u
                                ON u.id = gg.userid
-                            WHERE gi.itemtype = 'course'
-                              AND gg.finalgrade IS NOT NULL
-                              AND " . local_analitica_avanzada_regular_user_sql('u') . "
+                            WHERE " . implode(' AND ', $lowgradeconditions) . "
                          GROUP BY gg.userid
                       ) gradeavg
                      WHERE gradeavg.avggrade < :lowgrade";
 
-    $lowgradecount = (int) $DB->count_records_sql($lowgradesql, ['lowgrade' => 0.5]);
-
-    $completionrate = local_analitica_avanzada_get_global_completion_rate();
-    $avgsession = local_analitica_avanzada_get_global_average_session_time(time() - (30 * DAYSECS));
+    $lowgradecount = (int) $DB->count_records_sql($lowgradesql, $lowgradeparams);
+    $completionrate = local_analitica_avanzada_get_global_completion_rate($scope);
+    $avgsession = local_analitica_avanzada_get_global_average_session_time(time() - (30 * DAYSECS), $scope);
 
     return [
         'totalusers' => $totalusers,
@@ -246,28 +483,66 @@ function local_analitica_avanzada_get_global_metrics(): array {
 /**
  * Courses for the filter dropdown.
  */
-function local_analitica_avanzada_get_courses_for_filter(): array {
+function local_analitica_avanzada_get_courses_for_filter(array $scope = null): array {
     global $DB;
+
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
+    $params = ['siteid' => SITEID];
+    $conditions = ['c.id <> :siteid'];
+
+    if (!empty($scope['restricted'])) {
+        $courseids = local_analitica_avanzada_get_scoped_course_ids($scope);
+        if (empty($courseids)) {
+            return [];
+        }
+
+        [$insql, $courseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'filtercrs');
+        $params += $courseparams;
+        $conditions[] = "c.id {$insql}";
+    }
 
     $sql = "SELECT c.id, c.fullname
               FROM {course} c
-             WHERE c.id <> :siteid
+             WHERE " . implode(' AND ', $conditions) . "
           ORDER BY c.fullname ASC";
 
-    return $DB->get_records_sql_menu($sql, ['siteid' => SITEID]);
+    return $DB->get_records_sql_menu($sql, $params);
 }
 
 /**
  * Average grades for selected users.
  */
-function local_analitica_avanzada_get_user_average_grades(array $userids): array {
+function local_analitica_avanzada_get_user_average_grades(array $userids, array $scope = null, int $courseid = 0): array {
     global $DB;
 
     if (empty($userids)) {
         return [];
     }
 
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
+    $courseids = [];
+    if (!empty($scope['restricted'])) {
+        $courseids = local_analitica_avanzada_get_scoped_course_ids($scope);
+        if (empty($courseids)) {
+            return [];
+        }
+    }
+
     [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'uag');
+    $conditions = [
+        "gg.userid {$insql}",
+        "gi.itemtype = 'course'",
+        'gg.finalgrade IS NOT NULL',
+    ];
+
+    if (!empty($courseid)) {
+        $conditions[] = 'gi.courseid = :gradecourseid';
+        $params['gradecourseid'] = $courseid;
+    } else if (!empty($courseids)) {
+        [$courseinsql, $courseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'uagcrs');
+        $params += $courseparams;
+        $conditions[] = "gi.courseid {$courseinsql}";
+    }
 
     $sql = "SELECT gg.userid,
                    AVG(
@@ -280,9 +555,7 @@ function local_analitica_avanzada_get_user_average_grades(array $userids): array
               FROM {grade_grades} gg
               JOIN {grade_items} gi
                 ON gi.id = gg.itemid
-             WHERE gg.userid {$insql}
-               AND gi.itemtype = 'course'
-               AND gg.finalgrade IS NOT NULL
+             WHERE " . implode(' AND ', $conditions) . "
           GROUP BY gg.userid";
 
     $records = $DB->get_records_sql($sql, $params);
@@ -298,19 +571,34 @@ function local_analitica_avanzada_get_user_average_grades(array $userids): array
 /**
  * Progress percentage for selected users, based on completion-tracked activities.
  */
-function local_analitica_avanzada_get_user_progress(array $userids, int $courseid = 0): array {
+function local_analitica_avanzada_get_user_progress(array $userids, int $courseid = 0, array $scope = null): array {
     global $DB;
 
     if (empty($userids)) {
         return [];
     }
 
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
     [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'upg');
 
-    $coursesql = '';
+    $conditions = [
+        'ue.status = 0',
+        'e.status = 0',
+        "ue.userid {$insql}",
+    ];
+
     if (!empty($courseid)) {
-        $coursesql = ' AND e.courseid = :progresscourseid';
+        $conditions[] = 'e.courseid = :progresscourseid';
         $params['progresscourseid'] = $courseid;
+    } else if (!empty($scope['restricted'])) {
+        $courseids = local_analitica_avanzada_get_scoped_course_ids($scope);
+        if (empty($courseids)) {
+            return [];
+        }
+
+        [$courseinsql, $courseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'upgcrs');
+        $params += $courseparams;
+        $conditions[] = "e.courseid {$courseinsql}";
     }
 
     $sql = "SELECT uc.userid,
@@ -321,10 +609,7 @@ function local_analitica_avanzada_get_user_progress(array $userids, int $coursei
                       FROM {user_enrolments} ue
                       JOIN {enrol} e
                         ON e.id = ue.enrolid
-                     WHERE ue.status = 0
-                       AND e.status = 0
-                       AND ue.userid {$insql}
-                       {$coursesql}
+                     WHERE " . implode(' AND ', $conditions) . "
               ) uc
               JOIN {course_modules} cm
                 ON cm.course = uc.courseid
@@ -352,14 +637,31 @@ function local_analitica_avanzada_get_user_progress(array $userids, int $coursei
 /**
  * Courses enrolled by selected users.
  */
-function local_analitica_avanzada_get_user_courses(array $userids): array {
+function local_analitica_avanzada_get_user_courses(array $userids, array $scope = null): array {
     global $DB;
 
     if (empty($userids)) {
         return [];
     }
 
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
     [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'ucrs');
+    $conditions = [
+        'ue.status = 0',
+        'e.status = 0',
+        "ue.userid {$insql}",
+    ];
+
+    if (!empty($scope['restricted'])) {
+        $courseids = local_analitica_avanzada_get_scoped_course_ids($scope);
+        if (empty($courseids)) {
+            return [];
+        }
+
+        [$courseinsql, $courseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'ucrscrs');
+        $params += $courseparams;
+        $conditions[] = "e.courseid {$courseinsql}";
+    }
 
     $sql = "SELECT DISTINCT ue.userid, c.id, c.fullname
               FROM {user_enrolments} ue
@@ -367,9 +669,7 @@ function local_analitica_avanzada_get_user_courses(array $userids): array {
                 ON e.id = ue.enrolid
               JOIN {course} c
                 ON c.id = e.courseid
-             WHERE ue.status = 0
-               AND e.status = 0
-               AND ue.userid {$insql}
+             WHERE " . implode(' AND ', $conditions) . "
           ORDER BY c.fullname ASC";
 
     $records = $DB->get_records_sql($sql, $params);
@@ -455,14 +755,37 @@ function local_analitica_avanzada_get_user_session_times(array $userids, int $si
 /**
  * Filtered and enriched users.
  */
-function local_analitica_avanzada_get_filtered_users(array $filters, int $page = 0, int $perpage = 25): array {
+function local_analitica_avanzada_get_filtered_users(array $filters, int $page = 0, int $perpage = 25, array $scope = null): array {
     global $DB;
 
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
     $params = [];
     $joins = [];
     $where = [local_analitica_avanzada_regular_user_sql('u')];
 
+    if (!empty($scope['restricted'])) {
+        $userids = local_analitica_avanzada_get_scoped_user_ids($scope);
+        $courseids = local_analitica_avanzada_get_scoped_course_ids($scope);
+        if (empty($userids) || empty($courseids)) {
+            return [
+                'total' => 0,
+                'users' => [],
+            ];
+        }
+
+        [$userinsql, $userparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'scopeusr');
+        $params += $userparams;
+        $where[] = "u.id {$userinsql}";
+    }
+
     if (!empty($filters['courseid'])) {
+        if (!empty($scope['restricted']) && !in_array((int) $filters['courseid'], local_analitica_avanzada_get_scoped_course_ids($scope), true)) {
+            return [
+                'total' => 0,
+                'users' => [],
+            ];
+        }
+
         $joins[] = "JOIN (
                         SELECT DISTINCT ue.userid
                           FROM {user_enrolments} ue
@@ -498,7 +821,14 @@ function local_analitica_avanzada_get_filtered_users(array $filters, int $page =
                             ON ug.id = gg.userid
                          WHERE gi.itemtype = 'course'
                            AND gg.finalgrade IS NOT NULL
-                           AND " . local_analitica_avanzada_regular_user_sql('ug') . "
+                           AND " . local_analitica_avanzada_regular_user_sql('ug');
+        if (!empty($scope['restricted'])) {
+            [$gradecourseinsql, $gradecourseparams] = $DB->get_in_or_equal(local_analitica_avanzada_get_scoped_course_ids($scope), SQL_PARAMS_NAMED, 'lgcrs');
+            $params += $gradecourseparams;
+            $joins[count($joins) - 1] .= "
+                           AND gi.courseid {$gradecourseinsql}";
+        }
+        $joins[count($joins) - 1] .= "
                       GROUP BY gg.userid
                     ) lg
                     ON lg.userid = u.id";
@@ -543,9 +873,10 @@ function local_analitica_avanzada_get_filtered_users(array $filters, int $page =
         return (int) $user->id;
     }, $users);
 
-    $grades = local_analitica_avanzada_get_user_average_grades($userids);
-    $progress = local_analitica_avanzada_get_user_progress($userids, (int) ($filters['courseid'] ?? 0));
-    $courses = local_analitica_avanzada_get_user_courses($userids);
+    $selectedcourseid = (int) ($filters['courseid'] ?? 0);
+    $grades = local_analitica_avanzada_get_user_average_grades($userids, $scope, $selectedcourseid);
+    $progress = local_analitica_avanzada_get_user_progress($userids, $selectedcourseid, $scope);
+    $courses = local_analitica_avanzada_get_user_courses($userids, $scope);
     $sessions = local_analitica_avanzada_get_user_session_times($userids, time() - (30 * DAYSECS));
 
     foreach ($users as $user) {
@@ -581,9 +912,10 @@ function local_analitica_avanzada_render_course_badges(array $courses): string {
 /**
  * Most visited activities/resources from the last 30 days.
  */
-function local_analitica_avanzada_get_top_resources(int $limit = 20, int $courseid = 0): array {
+function local_analitica_avanzada_get_top_resources(int $limit = 20, int $courseid = 0, array $scope = null): array {
     global $DB;
 
+    $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
     $monthstart = time() - (30 * DAYSECS);
     $weekstart = time() - WEEKSECS;
     $daystart = time() - DAYSECS;
@@ -592,10 +924,38 @@ function local_analitica_avanzada_get_top_resources(int $limit = 20, int $course
         'ctxmodule' => CONTEXT_MODULE,
         'monthstart' => $monthstart,
     ];
+    $conditions = [
+        'l.contextlevel = :ctxmodule',
+        'l.timecreated >= :monthstart',
+        'l.anonymous = 0',
+        'l.userid > 0',
+        "l.crud = 'r'",
+    ];
 
-    $coursefilter = '';
-    if (!empty($courseid)) {
-        $coursefilter = ' AND cm.course = :resourcescourseid';
+    if (!empty($scope['restricted'])) {
+        $userids = local_analitica_avanzada_get_scoped_user_ids($scope);
+        $courseids = local_analitica_avanzada_get_scoped_course_ids($scope);
+        if (empty($userids) || empty($courseids)) {
+            return [];
+        }
+
+        [$userinsql, $userparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'resusr');
+        $params += $userparams;
+        $conditions[] = "l.userid {$userinsql}";
+
+        if (!empty($courseid)) {
+            if (!in_array($courseid, $courseids, true)) {
+                return [];
+            }
+            $conditions[] = 'cm.course = :resourcescourseid';
+            $params['resourcescourseid'] = $courseid;
+        } else {
+            [$courseinsql, $courseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'rescrs');
+            $params += $courseparams;
+            $conditions[] = "cm.course {$courseinsql}";
+        }
+    } else if (!empty($courseid)) {
+        $conditions[] = 'cm.course = :resourcescourseid';
         $params['resourcescourseid'] = $courseid;
     }
 
@@ -605,12 +965,7 @@ function local_analitica_avanzada_get_top_resources(int $limit = 20, int $course
                  FROM {logstore_standard_log} l
                  JOIN {course_modules} cm
                    ON cm.id = l.contextinstanceid
-                WHERE l.contextlevel = :ctxmodule
-                  AND l.timecreated >= :monthstart
-                  AND l.anonymous = 0
-                  AND l.userid > 0
-                  AND l.crud = 'r'
-                  {$coursefilter}
+                WHERE " . implode(' AND ', $conditions) . "
              GROUP BY l.contextinstanceid
              ORDER BY monthviews DESC";
 
@@ -636,6 +991,19 @@ function local_analitica_avanzada_get_top_resources(int $limit = 20, int $course
         'metricmonthstart1' => $monthstart,
         'metricmonthstart2' => $monthstart,
     ]);
+    $metricconditions = [
+        'l.contextlevel = :metricctxmodule',
+        "l.contextinstanceid {$insql}",
+        'l.anonymous = 0',
+        'l.userid > 0',
+        "l.crud = 'r'",
+    ];
+
+    if (!empty($scope['restricted'])) {
+        [$metricuserinsql, $metricuserparams] = $DB->get_in_or_equal(local_analitica_avanzada_get_scoped_user_ids($scope), SQL_PARAMS_NAMED, 'metricusr');
+        $metricparams += $metricuserparams;
+        $metricconditions[] = "l.userid {$metricuserinsql}";
+    }
 
     $metricsql = "SELECT l.contextinstanceid AS cmid,
                         SUM(CASE WHEN l.timecreated >= :metricdaystart1 THEN 1 ELSE 0 END) AS dayviews,
@@ -645,11 +1013,7 @@ function local_analitica_avanzada_get_top_resources(int $limit = 20, int $course
                         SUM(CASE WHEN l.timecreated >= :metricmonthstart1 THEN 1 ELSE 0 END) AS monthviews,
                         COUNT(DISTINCT CASE WHEN l.timecreated >= :metricmonthstart2 THEN l.userid ELSE NULL END) AS monthusers
                     FROM {logstore_standard_log} l
-                WHERE l.contextlevel = :metricctxmodule
-                    AND l.contextinstanceid {$insql}
-                    AND l.anonymous = 0
-                    AND l.userid > 0
-                    AND l.crud = 'r'
+                WHERE " . implode(' AND ', $metricconditions) . "
                 GROUP BY l.contextinstanceid";
 
     $metrics = $DB->get_records_sql($metricsql, $metricparams);
