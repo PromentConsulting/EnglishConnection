@@ -1,0 +1,295 @@
+<?php
+
+require_once(__DIR__ . '/../../config.php');
+require_once(__DIR__ . '/lib.php');
+
+require_login();
+
+if (!local_analitica_avanzada_user_can_view()) {
+    throw new required_capability_exception(
+        context_system::instance(),
+        'local/analitica_avanzada:view',
+        'nopermissions',
+        get_string('nopermission', 'local_analitica_avanzada')
+    );
+}
+
+$context = context_system::instance();
+$PAGE->set_context($context);
+$PAGE->set_url(new moodle_url('/local/analitica_avanzada/analitica_avanzada.php'));
+$PAGE->set_pagelayout('report');
+$PAGE->set_title(get_string('page_title', 'local_analitica_avanzada'));
+$PAGE->set_heading(get_string('page_title', 'local_analitica_avanzada'));
+$PAGE->requires->css(new moodle_url('/local/analitica_avanzada/styles.css'));
+
+$search = trim(optional_param('search', '', PARAM_TEXT));
+$courseid = optional_param('courseid', 0, PARAM_INT);
+$inactiveonly = optional_param('inactiveonly', 0, PARAM_BOOL);
+$lowgradeonly = optional_param('lowgradeonly', 0, PARAM_BOOL);
+$page = max(0, optional_param('page', 0, PARAM_INT));
+$perpage = 25;
+
+$filters = [
+    'search' => $search,
+    'courseid' => $courseid,
+    'inactiveonly' => $inactiveonly,
+    'lowgradeonly' => $lowgradeonly,
+];
+
+$metrics = local_analitica_avanzada_get_global_metrics();
+$userdata = local_analitica_avanzada_get_filtered_users($filters, $page, $perpage);
+$courses = local_analitica_avanzada_get_courses_for_filter();
+$resources = local_analitica_avanzada_get_top_resources(20, $courseid);
+
+$baseparams = [];
+if ($search !== '') {
+    $baseparams['search'] = $search;
+}
+if (!empty($courseid)) {
+    $baseparams['courseid'] = $courseid;
+}
+if (!empty($inactiveonly)) {
+    $baseparams['inactiveonly'] = 1;
+}
+if (!empty($lowgradeonly)) {
+    $baseparams['lowgradeonly'] = 1;
+}
+$baseurl = new moodle_url('/local/analitica_avanzada/analitica_avanzada.php', $baseparams);
+
+$from = $userdata['total'] > 0 ? ($page * $perpage) + 1 : 0;
+$to = min((($page * $perpage) + $perpage), $userdata['total']);
+
+$courseoptions = [html_writer::tag('option', 'Todos los cursos', ['value' => 0])];
+foreach ($courses as $id => $fullname) {
+    $attributes = ['value' => $id];
+    if ((int) $id === (int) $courseid) {
+        $attributes['selected'] = 'selected';
+    }
+    $courseoptions[] = html_writer::tag('option', format_string($fullname), $attributes);
+}
+
+echo $OUTPUT->header();
+
+echo html_writer::start_div('aa-dashboard');
+
+// Hero.
+echo html_writer::start_div('aa-hero');
+echo html_writer::tag('div', 'Dashboard personalizado Moodle', ['class' => 'aa-hero-kicker']);
+echo html_writer::tag('h1', 'Analítica Global', ['class' => 'aa-hero-title']);
+echo html_writer::tag('p', 'Visión global del rendimiento, progreso y uso de recursos de la plataforma.', ['class' => 'aa-hero-subtitle']);
+echo html_writer::tag(
+    'div',
+    'Las métricas de sesión y recursos se estiman con los logs de los últimos 30 días.',
+    ['class' => 'aa-hero-pill']
+);
+echo html_writer::end_div();
+
+// Global cards.
+echo html_writer::start_div('aa-grid-cards');
+
+$cards = [
+    [
+        'label' => 'Usuarios inactivos > 7 días',
+        'value' => number_format($metrics['inactivecount'], 0, ',', '.'),
+        'meta' => local_analitica_avanzada_format_percent($metrics['inactivepct']) . ' del total de usuarios',
+    ],
+    [
+        'label' => 'Calificación media < 50%',
+        'value' => number_format($metrics['lowgradecount'], 0, ',', '.'),
+        'meta' => local_analitica_avanzada_format_percent($metrics['lowgradepct']) . ' del total de usuarios',
+    ],
+    [
+        'label' => 'Tasa de finalización',
+        'value' => local_analitica_avanzada_format_percent($metrics['completionrate']),
+        'meta' => 'Sobre matrículas activas en cursos con finalización habilitada',
+    ],
+    [
+        'label' => 'Tiempo medio de la sesión',
+        'value' => local_analitica_avanzada_format_duration($metrics['avgsession']),
+        'meta' => 'Promedio estimado de todas las sesiones (30 días)',
+    ],
+];
+
+foreach ($cards as $card) {
+    echo html_writer::start_div('aa-card aa-metric-card');
+    echo html_writer::tag('div', $card['label'], ['class' => 'aa-card-label']);
+    echo html_writer::tag('div', $card['value'], ['class' => 'aa-card-value']);
+    echo html_writer::tag('div', $card['meta'], ['class' => 'aa-card-meta']);
+    echo html_writer::end_div();
+}
+
+echo html_writer::end_div();
+
+// Individual analytics.
+echo html_writer::start_div('aa-card aa-section-card');
+echo html_writer::tag('h2', 'Analítica individual', ['class' => 'aa-section-title']);
+echo html_writer::tag('p', 'Listado de usuarios con filtros, paginación y métricas individuales.', ['class' => 'aa-section-subtitle']);
+
+echo html_writer::start_tag('form', [
+    'method' => 'get',
+    'action' => new moodle_url('/local/analitica_avanzada/analitica_avanzada.php'),
+    'class' => 'aa-filters',
+]);
+
+echo html_writer::start_div('aa-filter-field aa-filter-search');
+echo html_writer::tag('label', 'Buscador', ['for' => 'aa-search']);
+echo html_writer::empty_tag('input', [
+    'type' => 'text',
+    'name' => 'search',
+    'id' => 'aa-search',
+    'value' => $search,
+    'placeholder' => 'Nombre, apellidos o email',
+]);
+echo html_writer::end_div();
+
+echo html_writer::start_div('aa-filter-field');
+echo html_writer::tag('label', 'Curso', ['for' => 'aa-courseid']);
+echo html_writer::tag('select', implode('', $courseoptions), [
+    'name' => 'courseid',
+    'id' => 'aa-courseid',
+]);
+echo html_writer::end_div();
+
+echo html_writer::start_div('aa-filter-field aa-filter-checks');
+echo html_writer::tag('span', 'Filtros rápidos', ['class' => 'aa-filter-label']);
+
+echo html_writer::start_div('aa-check-row');
+echo html_writer::empty_tag('input', [
+    'type' => 'checkbox',
+    'name' => 'inactiveonly',
+    'id' => 'aa-inactiveonly',
+    'value' => 1,
+    'checked' => !empty($inactiveonly) ? 'checked' : null,
+]);
+echo html_writer::tag('label', 'Más de 7 días desconectado', ['for' => 'aa-inactiveonly']);
+echo html_writer::end_div();
+
+echo html_writer::start_div('aa-check-row');
+echo html_writer::empty_tag('input', [
+    'type' => 'checkbox',
+    'name' => 'lowgradeonly',
+    'id' => 'aa-lowgradeonly',
+    'value' => 1,
+    'checked' => !empty($lowgradeonly) ? 'checked' : null,
+]);
+echo html_writer::tag('label', 'Calificación media inferior al 50%', ['for' => 'aa-lowgradeonly']);
+echo html_writer::end_div();
+
+echo html_writer::end_div();
+
+echo html_writer::start_div('aa-filter-actions');
+echo html_writer::empty_tag('input', [
+    'type' => 'submit',
+    'class' => 'btn btn-primary',
+    'value' => 'Aplicar filtros',
+]);
+echo html_writer::link(
+    new moodle_url('/local/analitica_avanzada/analitica_avanzada.php'),
+    'Limpiar',
+    ['class' => 'btn btn-secondary aa-reset-button']
+);
+echo html_writer::end_div();
+
+echo html_writer::end_tag('form');
+
+echo html_writer::start_div('aa-results-meta');
+echo html_writer::tag('div', 'Mostrando ' . $from . '–' . $to . ' de ' . $userdata['total'] . ' usuarios', ['class' => 'aa-results-count']);
+if ($userdata['total'] > $perpage) {
+    echo $OUTPUT->paging_bar($userdata['total'], $page, $perpage, $baseurl);
+}
+echo html_writer::end_div();
+
+echo html_writer::start_div('aa-table-wrap');
+echo html_writer::start_tag('table', ['class' => 'aa-table']);
+echo html_writer::start_tag('thead');
+echo html_writer::tag('tr',
+    html_writer::tag('th', 'Nombre') .
+    html_writer::tag('th', 'Apellidos') .
+    html_writer::tag('th', 'Última conexión') .
+    html_writer::tag('th', 'Calificación media') .
+    html_writer::tag('th', '% progreso') .
+    html_writer::tag('th', 'Tiempo medio de sesión') .
+    html_writer::tag('th', 'Curso/s inscritos')
+);
+echo html_writer::end_tag('thead');
+echo html_writer::start_tag('tbody');
+
+if (!empty($userdata['users'])) {
+    foreach ($userdata['users'] as $user) {
+        $lastname = s($user->lastname);
+        $firstname = s($user->firstname);
+        $lastaccess = !empty($user->lastaccess) ? userdate($user->lastaccess, get_string('strftimedatetimeshort')) : 'Nunca';
+        $gradeclass = ($user->avggrade !== null && $user->avggrade < 50) ? 'aa-pill aa-pill-alert' : 'aa-pill';
+        $progressclass = ($user->progress !== null && $user->progress < 50) ? 'aa-pill aa-pill-warning' : 'aa-pill';
+
+        echo html_writer::start_tag('tr');
+        echo html_writer::tag('td', $firstname);
+        echo html_writer::tag('td', $lastname);
+        echo html_writer::tag('td', $lastaccess);
+        echo html_writer::tag('td', html_writer::tag('span', local_analitica_avanzada_format_percent($user->avggrade), ['class' => $gradeclass]));
+        echo html_writer::tag('td', html_writer::tag('span', local_analitica_avanzada_format_percent($user->progress), ['class' => $progressclass]));
+        echo html_writer::tag('td', html_writer::tag('span', local_analitica_avanzada_format_duration((int) $user->avgsession), ['class' => 'aa-pill']));
+        echo html_writer::tag('td', local_analitica_avanzada_render_course_badges($user->courses));
+        echo html_writer::end_tag('tr');
+    }
+} else {
+    echo html_writer::tag('tr', html_writer::tag('td', 'No se han encontrado usuarios con los filtros aplicados.', ['colspan' => 7, 'class' => 'aa-empty-cell']));
+}
+
+echo html_writer::end_tag('tbody');
+echo html_writer::end_tag('table');
+echo html_writer::end_div();
+
+echo html_writer::end_div();
+
+// Resources table.
+echo html_writer::start_div('aa-card aa-section-card');
+echo html_writer::tag('h2', 'Recursos más visitados', ['class' => 'aa-section-title']);
+echo html_writer::tag('p', 'Top de actividades y recursos consultados durante los últimos 30 días.', ['class' => 'aa-section-subtitle']);
+
+echo html_writer::start_div('aa-table-wrap');
+echo html_writer::start_tag('table', ['class' => 'aa-table aa-resources-table']);
+echo html_writer::start_tag('thead');
+echo html_writer::tag('tr',
+    html_writer::tag('th', 'Recurso') .
+    html_writer::tag('th', 'Curso') .
+    html_writer::tag('th', 'Tipo') .
+    html_writer::tag('th', 'Visitas día') .
+    html_writer::tag('th', 'Usuarios día') .
+    html_writer::tag('th', 'Visitas semana') .
+    html_writer::tag('th', 'Usuarios semana') .
+    html_writer::tag('th', 'Visitas mes') .
+    html_writer::tag('th', 'Usuarios mes') .
+    html_writer::tag('th', '% tráfico mensual')
+);
+echo html_writer::end_tag('thead');
+echo html_writer::start_tag('tbody');
+
+if (!empty($resources)) {
+    foreach ($resources as $resource) {
+        echo html_writer::start_tag('tr');
+        echo html_writer::tag('td', s($resource['name']));
+        echo html_writer::tag('td', s($resource['course']));
+        echo html_writer::tag('td', html_writer::tag('span', s($resource['type']), ['class' => 'aa-pill']));
+        echo html_writer::tag('td', number_format($resource['dayviews'], 0, ',', '.'));
+        echo html_writer::tag('td', number_format($resource['dayusers'], 0, ',', '.'));
+        echo html_writer::tag('td', number_format($resource['weekviews'], 0, ',', '.'));
+        echo html_writer::tag('td', number_format($resource['weekusers'], 0, ',', '.'));
+        echo html_writer::tag('td', number_format($resource['monthviews'], 0, ',', '.'));
+        echo html_writer::tag('td', number_format($resource['monthusers'], 0, ',', '.'));
+        echo html_writer::tag('td', html_writer::tag('span', local_analitica_avanzada_format_percent($resource['sharepct']), ['class' => 'aa-pill aa-pill-info']));
+        echo html_writer::end_tag('tr');
+    }
+} else {
+    echo html_writer::tag('tr', html_writer::tag('td', 'No hay datos suficientes de acceso a recursos en el periodo analizado.', ['colspan' => 10, 'class' => 'aa-empty-cell']));
+}
+
+echo html_writer::end_tag('tbody');
+echo html_writer::end_tag('table');
+echo html_writer::end_div();
+
+echo html_writer::end_div();
+
+echo html_writer::end_div();
+
+echo $OUTPUT->footer();
