@@ -2,7 +2,9 @@
 
 require_once(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/lib.php');
-require_once($CFG->libdir . '/dataformatlib.php');
+if (file_exists($CFG->libdir . '/dataformatlib.php')) {
+    require_once($CFG->libdir . '/dataformatlib.php');
+}
 
 require_login();
 
