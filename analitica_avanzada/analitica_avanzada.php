@@ -56,8 +56,8 @@ if (!empty($scope['restricted']) && !empty($courseid) && !array_key_exists($cour
     $filters['courseid'] = 0;
 }
 
-// Handle CSV/Excel export before any output.
-if (!empty($export) && in_array($export, ['csv', 'xls', 'xlsx'], true)) {
+// Handle CSV export before any output.
+if (!empty($export) && $export === 'csv') {
     $allusers = local_analitica_avanzada_get_all_filtered_users($filters, $scope);
 
     $statuslabels = [
@@ -93,48 +93,15 @@ if (!empty($export) && in_array($export, ['csv', 'xls', 'xlsx'], true)) {
         ];
     }
 
-    if ($export === 'csv') {
-        header('Content-Type: text/csv; charset=UTF-8');
-        header('Content-Disposition: attachment; filename="analitica_usuarios_' . date('Ymd_His') . '.csv"');
-        header('Pragma: no-cache');
-        $out = fopen('php://output', 'w');
-        fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // BOM for Excel UTF-8.
-        foreach ($rows as $row) {
-            fputcsv($out, $row, ';');
-        }
-        fclose($out);
-        exit;
-    }
-
-    // Excel 97-2003 XML export (SpreadsheetML).
-    // Note: This format is XML (not OOXML ZIP), so the extension must be .xls.
-    $filename = 'analitica_usuarios_' . date('Ymd_His') . '.xls';
-    header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="analitica_usuarios_' . date('Ymd_His') . '.csv"');
     header('Pragma: no-cache');
-
-    // Build SpreadsheetML XML.
-    $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-    $xml .= '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
-        xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
-        xmlns:x="urn:schemas-microsoft-com:office:excel">';
-    $xml .= '<Styles>';
-    $xml .= '<Style ss:ID="header"><Font ss:Bold="1"/><Interior ss:Color="#2D4FA4" ss:Pattern="Solid"/><Font ss:Color="#FFFFFF" ss:Bold="1"/></Style>';
-    $xml .= '</Styles>';
-    $xml .= '<Worksheet ss:Name="Analítica"><Table>';
-
-    foreach ($rows as $i => $row) {
-        $xml .= '<Row>';
-        foreach ($row as $cell) {
-            $style = ($i === 0) ? ' ss:StyleID="header"' : '';
-            $escaped = htmlspecialchars((string) $cell, ENT_XML1, 'UTF-8');
-            $xml .= "<Cell{$style}><Data ss:Type=\"String\">{$escaped}</Data></Cell>";
-        }
-        $xml .= '</Row>';
+    $out = fopen('php://output', 'w');
+    fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // BOM for Excel UTF-8.
+    foreach ($rows as $row) {
+        fputcsv($out, $row, ';');
     }
-
-    $xml .= '</Table></Worksheet></Workbook>';
-    echo $xml;
+    fclose($out);
     exit;
 }
 
@@ -425,12 +392,10 @@ echo html_writer::end_div();
 // Export buttons.
 $exportbaseparams = $baseparams;
 $exportcsvurl = new moodle_url('/local/analitica_avanzada/analitica_avanzada.php', array_merge($exportbaseparams, ['export' => 'csv']));
-$exportxlsxurl = new moodle_url('/local/analitica_avanzada/analitica_avanzada.php', array_merge($exportbaseparams, ['export' => 'xls']));
 
 echo html_writer::start_div('aa-export-bar');
 echo html_writer::tag('span', 'Descargar listado:', ['class' => 'aa-export-label']);
-echo html_writer::link($exportcsvurl, '⬇ CSV', ['class' => 'btn btn-outline-secondary aa-export-btn']);
-echo html_writer::link($exportxlsxurl, '⬇ Excel (.xls)', ['class' => 'btn btn-outline-secondary aa-export-btn']);
+echo html_writer::link($exportcsvurl, 'Descargar', ['class' => 'btn btn-outline-secondary aa-export-btn']);
 echo html_writer::end_div();
 
 echo html_writer::end_div();
