@@ -57,7 +57,7 @@ if (!empty($scope['restricted']) && !empty($courseid) && !array_key_exists($cour
 }
 
 // Handle CSV/Excel export before any output.
-if (!empty($export) && in_array($export, ['csv', 'xlsx'], true)) {
+if (!empty($export) && in_array($export, ['csv', 'xls', 'xlsx'], true)) {
     $allusers = local_analitica_avanzada_get_all_filtered_users($filters, $scope);
 
     $statuslabels = [
@@ -106,9 +106,10 @@ if (!empty($export) && in_array($export, ['csv', 'xlsx'], true)) {
         exit;
     }
 
-    // XLSX export using a simple XML-based SpreadsheetML format.
-    $filename = 'analitica_usuarios_' . date('Ymd_His') . '.xlsx';
-    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    // Excel 97-2003 XML export (SpreadsheetML).
+    // Note: This format is XML (not OOXML ZIP), so the extension must be .xls.
+    $filename = 'analitica_usuarios_' . date('Ymd_His') . '.xls';
+    header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     header('Pragma: no-cache');
 
@@ -424,12 +425,12 @@ echo html_writer::end_div();
 // Export buttons.
 $exportbaseparams = $baseparams;
 $exportcsvurl = new moodle_url('/local/analitica_avanzada/analitica_avanzada.php', array_merge($exportbaseparams, ['export' => 'csv']));
-$exportxlsxurl = new moodle_url('/local/analitica_avanzada/analitica_avanzada.php', array_merge($exportbaseparams, ['export' => 'xlsx']));
+$exportxlsxurl = new moodle_url('/local/analitica_avanzada/analitica_avanzada.php', array_merge($exportbaseparams, ['export' => 'xls']));
 
 echo html_writer::start_div('aa-export-bar');
 echo html_writer::tag('span', 'Descargar listado:', ['class' => 'aa-export-label']);
 echo html_writer::link($exportcsvurl, '⬇ CSV', ['class' => 'btn btn-outline-secondary aa-export-btn']);
-echo html_writer::link($exportxlsxurl, '⬇ Excel (.xlsx)', ['class' => 'btn btn-outline-secondary aa-export-btn']);
+echo html_writer::link($exportxlsxurl, '⬇ Excel (.xls)', ['class' => 'btn btn-outline-secondary aa-export-btn']);
 echo html_writer::end_div();
 
 echo html_writer::end_div();
