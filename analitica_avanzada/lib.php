@@ -555,7 +555,7 @@ function local_analitica_avanzada_get_user_progress(array $userids, int $coursei
 /**
  * Courses enrolled by selected users.
  */
-function local_analitica_avanzada_get_user_courses(array $userids, array $scope = null): array {
+function local_analitica_avanzada_get_user_courses(array $userids, array $scope = null, int $courseid = 0): array {
     global $DB;
 
     if (empty($userids)) {
@@ -569,6 +569,11 @@ function local_analitica_avanzada_get_user_courses(array $userids, array $scope 
         'e.status = 0',
         "ue.userid {$insql}",
     ];
+
+    if (!empty($courseid)) {
+        $conditions[] = 'e.courseid = :ucrscourseid';
+        $params['ucrscourseid'] = $courseid;
+    }
 
     if (!empty($scope['restricted'])) {
         $courseids = local_analitica_avanzada_get_scoped_course_ids($scope);
@@ -700,10 +705,51 @@ function local_analitica_avanzada_get_user_enrolment_dates(array $userids, int $
         $conditions[] = "e.courseid {$courseinsql}";
     }
 
-    // Get the latest enrolment timeend per user (most relevant for status).
+    $now = time();
+    $params['uednow1'] = $now;
+    $params['uednow2'] = $now;
+    $params['uednow3'] = $now;
+    $params['uednow4'] = $now;
+
+    // Aggregate enrolments per user and compute a deterministic status.
     $sql = "SELECT ue.userid,
                    MIN(ue.timestart) AS timestart,
-                   MAX(ue.timeend) AS timeend
+                   CASE
+                       WHEN MAX(
+                           CASE
+                               WHEN (ue.timestart = 0 OR ue.timestart <= :uednow1)
+                                AND (ue.timeend = 0 OR ue.timeend >= :uednow2)
+                               THEN 1 ELSE 0
+                           END
+                       ) = 1
+                       THEN MAX(
+                           CASE
+                               WHEN (ue.timestart = 0 OR ue.timestart <= :uednow3) AND ue.timeend > 0
+                               THEN ue.timeend ELSE 0
+                           END
+                       )
+                       ELSE MAX(
+                           CASE
+                               WHEN ue.timeend > 0 AND ue.timeend < :uednow4
+                               THEN ue.timeend ELSE 0
+                           END
+                       )
+                   END AS timeend,
+                   CASE
+                       WHEN MAX(
+                           CASE
+                               WHEN (ue.timestart = 0 OR ue.timestart <= :uednow1)
+                                AND (ue.timeend = 0 OR ue.timeend >= :uednow2)
+                               THEN 1 ELSE 0
+                           END
+                       ) = 1
+                       THEN 'active'
+                       WHEN MAX(CASE WHEN ue.timestart > :uednow3 THEN 1 ELSE 0 END) = 1
+                       THEN 'pending'
+                       WHEN MAX(CASE WHEN ue.timeend > 0 AND ue.timeend < :uednow4 THEN 1 ELSE 0 END) = 1
+                       THEN 'finished'
+                       ELSE 'active'
+                   END AS enrolstatus
               FROM {user_enrolments} ue
               JOIN {enrol} e ON e.id = ue.enrolid
              WHERE " . implode(' AND ', $conditions) . "
@@ -716,6 +762,7 @@ function local_analitica_avanzada_get_user_enrolment_dates(array $userids, int $
         $result[(int) $record->userid] = [
             'timestart' => (int) $record->timestart,
             'timeend' => (int) $record->timeend,
+            'enrolstatus' => (string) $record->enrolstatus,
         ];
     }
 
@@ -841,36 +888,54 @@ function local_analitica_avanzada_get_filtered_users(array $filters, int $page =
     $statusfilter = $filters['status'] ?? '';
     if (!empty($statusfilter) && in_array($statusfilter, ['pending', 'active', 'finished'], true)) {
         $now = time();
-        if ($statusfilter === 'pending') {
-            $joins[] = "JOIN (
-                            SELECT DISTINCT ue.userid
-                              FROM {user_enrolments} ue
-                              JOIN {enrol} e ON e.id = ue.enrolid
-                             WHERE ue.status = 0 AND e.status = 0
-                               AND ue.timestart > :statusnow1
-                        ) stf ON stf.userid = u.id";
-            $params['statusnow1'] = $now;
-        } else if ($statusfilter === 'finished') {
-            $joins[] = "JOIN (
-                            SELECT DISTINCT ue.userid
-                              FROM {user_enrolments} ue
-                              JOIN {enrol} e ON e.id = ue.enrolid
-                             WHERE ue.status = 0 AND e.status = 0
-                               AND ue.timeend > 0 AND ue.timeend < :statusnow2
-                        ) stf ON stf.userid = u.id";
-            $params['statusnow2'] = $now;
-        } else if ($statusfilter === 'active') {
-            $joins[] = "JOIN (
-                            SELECT DISTINCT ue.userid
-                              FROM {user_enrolments} ue
-                              JOIN {enrol} e ON e.id = ue.enrolid
-                             WHERE ue.status = 0 AND e.status = 0
-                               AND (ue.timestart = 0 OR ue.timestart <= :statusnow3)
-                               AND (ue.timeend = 0 OR ue.timeend >= :statusnow4)
-                        ) stf ON stf.userid = u.id";
-            $params['statusnow3'] = $now;
-            $params['statusnow4'] = $now;
+        $statuswhere = [
+            'ue.status = 0',
+            'e.status = 0',
+        ];
+        $statusparams = [
+            'statusnow1' => $now,
+            'statusnow2' => $now,
+            'statusnow3' => $now,
+            'statusnow4' => $now,
+        ];
+
+        $selectedcourseid = (int) ($filters['courseid'] ?? 0);
+        if (!empty($selectedcourseid)) {
+            $statuswhere[] = 'e.courseid = :statuscourseid';
+            $statusparams['statuscourseid'] = $selectedcourseid;
+        } else if (!empty($scope['restricted'])) {
+            [$statuscourseinsql, $statuscourseparams] = $DB->get_in_or_equal(local_analitica_avanzada_get_scoped_course_ids($scope), SQL_PARAMS_NAMED, 'statuscrs');
+            $statuswhere[] = "e.courseid {$statuscourseinsql}";
+            $statusparams += $statuscourseparams;
         }
+
+        $statushaving = '';
+        if ($statusfilter === 'active') {
+            $statushaving = "HAVING MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow1)
+                                           AND (ue.timeend = 0 OR ue.timeend >= :statusnow2)
+                                      THEN 1 ELSE 0 END) = 1";
+        } else if ($statusfilter === 'pending') {
+            $statushaving = "HAVING MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow1)
+                                           AND (ue.timeend = 0 OR ue.timeend >= :statusnow2)
+                                      THEN 1 ELSE 0 END) = 0
+                                AND MAX(CASE WHEN ue.timestart > :statusnow3 THEN 1 ELSE 0 END) = 1";
+        } else if ($statusfilter === 'finished') {
+            $statushaving = "HAVING MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow1)
+                                           AND (ue.timeend = 0 OR ue.timeend >= :statusnow2)
+                                      THEN 1 ELSE 0 END) = 0
+                                AND MAX(CASE WHEN ue.timestart > :statusnow3 THEN 1 ELSE 0 END) = 0
+                                AND MAX(CASE WHEN ue.timeend > 0 AND ue.timeend < :statusnow4 THEN 1 ELSE 0 END) = 1";
+        }
+
+        $joins[] = "JOIN (
+                        SELECT ue.userid
+                          FROM {user_enrolments} ue
+                          JOIN {enrol} e ON e.id = ue.enrolid
+                         WHERE " . implode(' AND ', $statuswhere) . "
+                      GROUP BY ue.userid
+                        {$statushaving}
+                    ) stf ON stf.userid = u.id";
+        $params += $statusparams;
     }
 
     if (!empty($filters['search'])) {
@@ -915,7 +980,7 @@ function local_analitica_avanzada_get_filtered_users(array $filters, int $page =
     $selectedcourseid = (int) ($filters['courseid'] ?? 0);
     $grades = local_analitica_avanzada_get_user_average_grades($userids, $scope, $selectedcourseid);
     $progress = local_analitica_avanzada_get_user_progress($userids, $selectedcourseid, $scope);
-    $courses = local_analitica_avanzada_get_user_courses($userids, $scope);
+    $courses = local_analitica_avanzada_get_user_courses($userids, $scope, $selectedcourseid);
     $sessions = local_analitica_avanzada_get_user_session_times($userids, time() - (30 * DAYSECS));
     $enrolments = local_analitica_avanzada_get_user_enrolment_dates($userids, $selectedcourseid, $scope);
 
@@ -929,7 +994,7 @@ function local_analitica_avanzada_get_filtered_users(array $filters, int $page =
         $enrol = $enrolments[$userid] ?? ['timestart' => 0, 'timeend' => 0];
         $user->timestart = $enrol['timestart'];
         $user->timeend = $enrol['timeend'];
-        $user->enrolstatus = local_analitica_avanzada_get_enrolment_status($enrol['timestart'], $enrol['timeend']);
+        $user->enrolstatus = $enrol['enrolstatus'] ?? local_analitica_avanzada_get_enrolment_status($enrol['timestart'], $enrol['timeend']);
     }
 
     return [
@@ -1019,9 +1084,22 @@ function local_analitica_avanzada_get_top_resources(int $limit = 20, int $course
         $params['moduletypefilter'] = $moduletype;
     }
 
+    $params += [
+        'resdaystart1' => $daystart,
+        'resdaystart2' => $daystart,
+        'resweekstart1' => $weekstart,
+        'resweekstart2' => $weekstart,
+        'resmonthstart1' => $monthstart,
+        'resmonthstart2' => $monthstart,
+    ];
+
     $topsql = "SELECT l.contextinstanceid AS cmid,
-                      COUNT(*) AS monthviews,
-                      COUNT(DISTINCT l.userid) AS monthusers
+                      SUM(CASE WHEN l.timecreated >= :resdaystart1 THEN 1 ELSE 0 END) AS dayviews,
+                      COUNT(DISTINCT CASE WHEN l.timecreated >= :resdaystart2 THEN l.userid ELSE NULL END) AS dayusers,
+                      SUM(CASE WHEN l.timecreated >= :resweekstart1 THEN 1 ELSE 0 END) AS weekviews,
+                      COUNT(DISTINCT CASE WHEN l.timecreated >= :resweekstart2 THEN l.userid ELSE NULL END) AS weekusers,
+                      SUM(CASE WHEN l.timecreated >= :resmonthstart1 THEN 1 ELSE 0 END) AS monthviews,
+                      COUNT(DISTINCT CASE WHEN l.timecreated >= :resmonthstart2 THEN l.userid ELSE NULL END) AS monthusers
                  FROM {logstore_standard_log} l
                  JOIN {course_modules} cm ON cm.id = l.contextinstanceid
                  JOIN {modules} mo ON mo.id = cm.module
@@ -1042,44 +1120,6 @@ function local_analitica_avanzada_get_top_resources(int $limit = 20, int $course
         $cmids[] = (int) $record->cmid;
     }
 
-    [$insql, $inparams] = $DB->get_in_or_equal($cmids, SQL_PARAMS_NAMED, 'rescm');
-    $metricparams = array_merge($inparams, [
-        'metricctxmodule'   => CONTEXT_MODULE,
-        'metricdaystart1'   => $daystart,
-        'metricdaystart2'   => $daystart,
-        'metricweekstart1'  => $weekstart,
-        'metricweekstart2'  => $weekstart,
-        'metricmonthstart1' => $monthstart,
-        'metricmonthstart2' => $monthstart,
-    ]);
-    $metricconditions = [
-        'l.contextlevel = :metricctxmodule',
-        "l.contextinstanceid {$insql}",
-        'l.anonymous = 0',
-        'l.userid > 0',
-        "l.crud = 'r'",
-        local_analitica_avanzada_student_role_sql_log(),
-    ];
-
-    if (!empty($scope['restricted'])) {
-        [$metricuserinsql, $metricuserparams] = $DB->get_in_or_equal(local_analitica_avanzada_get_scoped_user_ids($scope), SQL_PARAMS_NAMED, 'metricusr');
-        $metricparams += $metricuserparams;
-        $metricconditions[] = "l.userid {$metricuserinsql}";
-    }
-
-    $metricsql = "SELECT l.contextinstanceid AS cmid,
-                        SUM(CASE WHEN l.timecreated >= :metricdaystart1 THEN 1 ELSE 0 END) AS dayviews,
-                        COUNT(DISTINCT CASE WHEN l.timecreated >= :metricdaystart2 THEN l.userid ELSE NULL END) AS dayusers,
-                        SUM(CASE WHEN l.timecreated >= :metricweekstart1 THEN 1 ELSE 0 END) AS weekviews,
-                        COUNT(DISTINCT CASE WHEN l.timecreated >= :metricweekstart2 THEN l.userid ELSE NULL END) AS weekusers,
-                        SUM(CASE WHEN l.timecreated >= :metricmonthstart1 THEN 1 ELSE 0 END) AS monthviews,
-                        COUNT(DISTINCT CASE WHEN l.timecreated >= :metricmonthstart2 THEN l.userid ELSE NULL END) AS monthusers
-                    FROM {logstore_standard_log} l
-                    JOIN {user} u_res ON u_res.id = l.userid
-                WHERE " . implode(' AND ', $metricconditions) . "
-                GROUP BY l.contextinstanceid";
-
-    $metrics = $DB->get_records_sql($metricsql, $metricparams);
     $cms = $DB->get_records_list('course_modules', 'id', $cmids, '', 'id,course,module');
 
     $moduleids = [];
@@ -1118,19 +1158,17 @@ function local_analitica_avanzada_get_top_resources(int $limit = 20, int $course
             $cmname = $modinfo->cms[$cmid]->name;
         }
 
-        $metric = $metrics[$cmid] ?? null;
-
         $results[] = [
             'name' => format_string($cmname),
             'course' => isset($courses_res[$courseidcurrent]) ? format_string($courses_res[$courseidcurrent]->fullname) : '—',
             'type' => $modules[$cm->module]->name ?? 'activity',
-            'dayviews' => $metric ? (int) $metric->dayviews : 0,
-            'dayusers' => $metric ? (int) $metric->dayusers : 0,
-            'weekviews' => $metric ? (int) $metric->weekviews : 0,
-            'weekusers' => $metric ? (int) $metric->weekusers : 0,
-            'monthviews' => $metric ? (int) $metric->monthviews : (int) $record->monthviews,
-            'monthusers' => $metric ? (int) $metric->monthusers : (int) $record->monthusers,
-            'sharepct' => $totalmonthviews > 0 ? (((int) ($metric->monthviews ?? $record->monthviews)) / $totalmonthviews) * 100 : 0,
+            'dayviews' => (int) $record->dayviews,
+            'dayusers' => (int) $record->dayusers,
+            'weekviews' => (int) $record->weekviews,
+            'weekusers' => (int) $record->weekusers,
+            'monthviews' => (int) $record->monthviews,
+            'monthusers' => (int) $record->monthusers,
+            'sharepct' => $totalmonthviews > 0 ? (((int) $record->monthviews) / $totalmonthviews) * 100 : 0,
         ];
     }
 
@@ -1169,6 +1207,7 @@ function local_analitica_avanzada_get_resource_module_types(int $courseid = 0, a
         'l.anonymous = 0',
         'l.userid > 0',
         "l.crud = 'r'",
+        local_analitica_avanzada_student_role_sql_log(),
     ];
 
     if (!empty($scope['restricted'])) {
@@ -1181,6 +1220,9 @@ function local_analitica_avanzada_get_resource_module_types(int $courseid = 0, a
         $params += $userparams;
         $conditions[] = "l.userid {$userinsql}";
         if (!empty($courseid)) {
+            if (!in_array($courseid, $courseids, true)) {
+                return [];
+            }
             $conditions[] = 'cm.course = :mtcourseid';
             $params['mtcourseid'] = $courseid;
         } else {
@@ -1195,6 +1237,7 @@ function local_analitica_avanzada_get_resource_module_types(int $courseid = 0, a
 
     $sql = "SELECT DISTINCT mo.name
               FROM {logstore_standard_log} l
+              JOIN {user} u_res ON u_res.id = l.userid
               JOIN {course_modules} cm ON cm.id = l.contextinstanceid
               JOIN {modules} mo ON mo.id = cm.module
              WHERE " . implode(' AND ', $conditions) . "
