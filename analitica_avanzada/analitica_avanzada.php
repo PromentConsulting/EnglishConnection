@@ -27,12 +27,17 @@ $courseid    = optional_param('courseid', 0, PARAM_INT);
 $inactiveonly = optional_param('inactiveonly', 0, PARAM_BOOL);
 $lowgradeonly = optional_param('lowgradeonly', 0, PARAM_BOOL);
 $statusfilter = optional_param('status', '', PARAM_ALPHA);
+$groupfilter  = optional_param('groupfilter', '', PARAM_ALPHANUMEXT);
 $page        = max(0, optional_param('page', 0, PARAM_INT));
 $perpage     = 25;
 
 // Resources section filters.
 $rescourse   = optional_param('rescourse', 0, PARAM_INT);
 $restype     = optional_param('restype', '', PARAM_ALPHANUMEXT);
+$resgroupfilter = optional_param('resgroupfilter', '', PARAM_ALPHANUMEXT);
+
+$groupfilter = core_text::strtolower(trim($groupfilter));
+$resgroupfilter = core_text::strtolower(trim($resgroupfilter));
 
 // Export action.
 $export      = optional_param('export', '', PARAM_ALPHA);
@@ -43,6 +48,7 @@ $filters = [
     'inactiveonly' => $inactiveonly,
     'lowgradeonly' => $lowgradeonly,
     'status'       => $statusfilter,
+    'groupfilter'  => $groupfilter,
 ];
 
 $scope = local_analitica_avanzada_get_dashboard_scope();
@@ -135,8 +141,8 @@ if (!empty($export) && in_array($export, ['csv', 'xlsx'], true)) {
 
 $metrics  = local_analitica_avanzada_get_global_metrics($scope);
 $userdata = local_analitica_avanzada_get_filtered_users($filters, $page, $perpage, $scope);
-$resources = local_analitica_avanzada_get_top_resources(20, $rescourse, $scope, $restype);
-$moduletypes = local_analitica_avanzada_get_resource_module_types($rescourse, $scope);
+$resources = local_analitica_avanzada_get_top_resources(20, $rescourse, $scope, $restype, $resgroupfilter);
+$moduletypes = local_analitica_avanzada_get_resource_module_types($rescourse, $scope, $resgroupfilter);
 
 $baseparams = [];
 if ($search !== '') {
@@ -153,6 +159,9 @@ if (!empty($lowgradeonly)) {
 }
 if (!empty($statusfilter)) {
     $baseparams['status'] = $statusfilter;
+}
+if (!empty($groupfilter)) {
+    $baseparams['groupfilter'] = $groupfilter;
 }
 $baseurl = new moodle_url('/local/analitica_avanzada/analitica_avanzada.php', $baseparams);
 
@@ -187,6 +196,25 @@ foreach ($moduletypes as $mtype) {
         $attributes['selected'] = 'selected';
     }
     $restypeoptions[] = html_writer::tag('option', ucfirst($mtype), $attributes);
+}
+
+$specialgroups = local_analitica_avanzada_get_special_group_filters();
+$groupfilteroptions = [html_writer::tag('option', 'Todos los grupos', ['value' => ''])];
+foreach ($specialgroups as $specialgroupkey => $specialgrouplabel) {
+    $attributes = ['value' => $specialgroupkey];
+    if ($specialgroupkey === $groupfilter) {
+        $attributes['selected'] = 'selected';
+    }
+    $groupfilteroptions[] = html_writer::tag('option', s($specialgrouplabel), $attributes);
+}
+
+$resgroupfilteroptions = [html_writer::tag('option', 'Todos los grupos', ['value' => ''])];
+foreach ($specialgroups as $specialgroupkey => $specialgrouplabel) {
+    $attributes = ['value' => $specialgroupkey];
+    if ($specialgroupkey === $resgroupfilter) {
+        $attributes['selected'] = 'selected';
+    }
+    $resgroupfilteroptions[] = html_writer::tag('option', s($specialgrouplabel), $attributes);
 }
 
 echo $OUTPUT->header();
@@ -282,6 +310,14 @@ $statusoptions = [
 echo html_writer::tag('select', implode('', $statusoptions), [
     'name' => 'status',
     'id'   => 'aa-status',
+]);
+echo html_writer::end_div();
+
+echo html_writer::start_div('aa-filter-field');
+echo html_writer::tag('label', 'Grupo especial', ['for' => 'aa-groupfilter']);
+echo html_writer::tag('select', implode('', $groupfilteroptions), [
+    'name' => 'groupfilter',
+    'id'   => 'aa-groupfilter',
 ]);
 echo html_writer::end_div();
 
@@ -439,13 +475,21 @@ echo html_writer::tag('select', implode('', $restypeoptions), [
 ]);
 echo html_writer::end_div();
 
+echo html_writer::start_div('aa-filter-field');
+echo html_writer::tag('label', 'Grupo especial', ['for' => 'aa-resgroupfilter']);
+echo html_writer::tag('select', implode('', $resgroupfilteroptions), [
+    'name' => 'resgroupfilter',
+    'id'   => 'aa-resgroupfilter',
+]);
+echo html_writer::end_div();
+
 echo html_writer::start_div('aa-filter-actions');
 echo html_writer::empty_tag('input', [
     'type'  => 'submit',
     'class' => 'btn btn-primary',
     'value' => 'Filtrar recursos',
 ]);
-if (!empty($rescourse) || !empty($restype)) {
+if (!empty($rescourse) || !empty($restype) || !empty($resgroupfilter)) {
     $clearresurl = new moodle_url('/local/analitica_avanzada/analitica_avanzada.php', $baseparams);
     echo html_writer::link($clearresurl, 'Limpiar', ['class' => 'btn btn-secondary aa-reset-button']);
 }
