@@ -171,6 +171,13 @@ function local_analitica_avanzada_get_special_group_filters(): array {
 }
 
 /**
+ * Synthetic key for groups not present in the nomenclature list.
+ */
+function local_analitica_avanzada_get_other_groups_filter_key(): string {
+    return 'otrosgrupos';
+}
+
+/**
  * Normalize a group filter key for matching.
  */
 function local_analitica_avanzada_normalize_group_filter_key(string $value): string {
@@ -182,6 +189,58 @@ function local_analitica_avanzada_normalize_group_filter_key(string $value): str
  */
 function local_analitica_avanzada_group_name_normalized_sql(string $field = 'g.name'): string {
     return "LOWER(REPLACE(REPLACE(REPLACE(REPLACE({$field}, '-', ''), ' ', ''), '.', ''), '_', ''))";
+}
+
+/**
+ * Build SQL condition for a group filter.
+ */
+function local_analitica_avanzada_get_group_filter_sql_condition(string $groupfilter, string $useridfield, string $paramprefix, array &$params): ?string {
+    $groupfilter = core_text::strtolower(trim($groupfilter));
+    if ($groupfilter === '') {
+        return null;
+    }
+
+    $specialgroups = local_analitica_avanzada_get_special_group_filters();
+    if ($groupfilter === local_analitica_avanzada_get_other_groups_filter_key()) {
+        $knownclauses = [];
+        $knownindex = 0;
+        foreach (array_keys($specialgroups) as $specialgroupkey) {
+            $paramname = $paramprefix . 'known' . $knownindex++;
+            $params[$paramname] = '%' . local_analitica_avanzada_normalize_group_filter_key($specialgroupkey) . '%';
+            $knownclauses[] = local_analitica_avanzada_group_name_normalized_sql('g_known.name') . " LIKE :{$paramname}";
+        }
+
+        if (empty($knownclauses)) {
+            return "EXISTS (SELECT 1 FROM {groups_members} gm_any WHERE gm_any.userid = {$useridfield})";
+        }
+
+        return "EXISTS (
+                    SELECT 1
+                      FROM {groups_members} gm_any
+                     WHERE gm_any.userid = {$useridfield}
+                ) AND NOT EXISTS (
+                    SELECT 1
+                      FROM {groups_members} gm_known
+                      JOIN {groups} g_known ON g_known.id = gm_known.groupid
+                     WHERE gm_known.userid = {$useridfield}
+                       AND (" . implode(' OR ', $knownclauses) . ")
+                )";
+    }
+
+    if (!array_key_exists($groupfilter, $specialgroups)) {
+        return null;
+    }
+
+    $needleparam = $paramprefix . 'needle';
+    $params[$needleparam] = '%' . local_analitica_avanzada_normalize_group_filter_key($groupfilter) . '%';
+
+    return "EXISTS (
+                SELECT 1
+                  FROM {groups_members} gm
+                  JOIN {groups} g ON g.id = gm.groupid
+                 WHERE gm.userid = {$useridfield}
+                   AND " . local_analitica_avanzada_group_name_normalized_sql('g.name') . " LIKE :{$needleparam}
+            )";
 }
 
 /**
@@ -1029,16 +1088,10 @@ function local_analitica_avanzada_get_filtered_users(array $filters, int $page =
         $params['filtercourseid'] = (int) $filters['courseid'];
     }
 
-    $specialgroups = local_analitica_avanzada_get_special_group_filters();
-    $groupfilter = trim((string) ($filters['groupfilter'] ?? ''));
-    if ($groupfilter !== '' && array_key_exists($groupfilter, $specialgroups)) {
-        $joins[] = "JOIN (
-                        SELECT DISTINCT gm.userid
-                          FROM {groups_members} gm
-                          JOIN {groups} g ON g.id = gm.groupid
-                         WHERE " . local_analitica_avanzada_group_name_normalized_sql('g.name') . " LIKE :groupfilterneedle
-                    ) gf ON gf.userid = u.id";
-        $params['groupfilterneedle'] = '%' . local_analitica_avanzada_normalize_group_filter_key($groupfilter) . '%';
+    $groupfilter = (string) ($filters['groupfilter'] ?? '');
+    $groupfiltercondition = local_analitica_avanzada_get_group_filter_sql_condition($groupfilter, 'u.id', 'usrgroupfilter', $params);
+    if ($groupfiltercondition !== null) {
+        $where[] = $groupfiltercondition;
     }
 
     if (!empty($filters['inactiveonly'])) {
@@ -1275,17 +1328,9 @@ function local_analitica_avanzada_get_top_resources(int $limit = 20, int $course
         $params['moduletypefilter'] = $moduletype;
     }
 
-    $groupfilter = trim($groupfilter);
-    $specialgroups = local_analitica_avanzada_get_special_group_filters();
-    if ($groupfilter !== '' && array_key_exists($groupfilter, $specialgroups)) {
-        $conditions[] = "EXISTS (
-            SELECT 1
-              FROM {groups_members} gm
-              JOIN {groups} g ON g.id = gm.groupid
-             WHERE gm.userid = l.userid
-               AND " . local_analitica_avanzada_group_name_normalized_sql('g.name') . " LIKE :resgroupfilterneedle
-        )";
-        $params['resgroupfilterneedle'] = '%' . local_analitica_avanzada_normalize_group_filter_key($groupfilter) . '%';
+    $groupcondition = local_analitica_avanzada_get_group_filter_sql_condition($groupfilter, 'l.userid', 'resgroupfilter', $params);
+    if ($groupcondition !== null) {
+        $conditions[] = $groupcondition;
     }
 
     $params += [
@@ -1439,17 +1484,9 @@ function local_analitica_avanzada_get_resource_module_types(int $courseid = 0, a
         $params['mtcourseid'] = $courseid;
     }
 
-    $groupfilter = trim($groupfilter);
-    $specialgroups = local_analitica_avanzada_get_special_group_filters();
-    if ($groupfilter !== '' && array_key_exists($groupfilter, $specialgroups)) {
-        $conditions[] = "EXISTS (
-            SELECT 1
-              FROM {groups_members} gm
-              JOIN {groups} g ON g.id = gm.groupid
-             WHERE gm.userid = l.userid
-               AND " . local_analitica_avanzada_group_name_normalized_sql('g.name') . " LIKE :mtgroupfilterneedle
-        )";
-        $params['mtgroupfilterneedle'] = '%' . local_analitica_avanzada_normalize_group_filter_key($groupfilter) . '%';
+    $groupcondition = local_analitica_avanzada_get_group_filter_sql_condition($groupfilter, 'l.userid', 'mtgroupfilter', $params);
+    if ($groupcondition !== null) {
+        $conditions[] = $groupcondition;
     }
 
     $sql = "SELECT DISTINCT mo.name

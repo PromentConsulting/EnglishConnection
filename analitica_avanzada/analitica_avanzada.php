@@ -27,14 +27,14 @@ $courseid    = optional_param('courseid', 0, PARAM_INT);
 $inactiveonly = optional_param('inactiveonly', 0, PARAM_BOOL);
 $lowgradeonly = optional_param('lowgradeonly', 0, PARAM_BOOL);
 $statusfilter = optional_param('status', '', PARAM_ALPHA);
-$groupfilter  = optional_param('groupfilter', '', PARAM_ALPHANUMEXT);
+$groupfilter  = optional_param('groupfilter', '', PARAM_TEXT);
 $page        = max(0, optional_param('page', 0, PARAM_INT));
 $perpage     = 25;
 
 // Resources section filters.
 $rescourse   = optional_param('rescourse', 0, PARAM_INT);
 $restype     = optional_param('restype', '', PARAM_ALPHANUMEXT);
-$resgroupfilter = optional_param('resgroupfilter', '', PARAM_ALPHANUMEXT);
+$resgroupfilter = optional_param('resgroupfilter', '', PARAM_TEXT);
 
 $groupfilter = core_text::strtolower(trim($groupfilter));
 $resgroupfilter = core_text::strtolower(trim($resgroupfilter));
@@ -207,6 +207,11 @@ foreach ($specialgroups as $specialgroupkey => $specialgrouplabel) {
     }
     $groupfilteroptions[] = html_writer::tag('option', s($specialgrouplabel), $attributes);
 }
+$othergroupskey = local_analitica_avanzada_get_other_groups_filter_key();
+$groupfilteroptions[] = html_writer::tag('option', 'Otros grupos', array_merge(
+    ['value' => $othergroupskey],
+    $groupfilter === $othergroupskey ? ['selected' => 'selected'] : []
+));
 
 $resgroupfilteroptions = [html_writer::tag('option', 'Todos los grupos', ['value' => ''])];
 foreach ($specialgroups as $specialgroupkey => $specialgrouplabel) {
@@ -216,6 +221,10 @@ foreach ($specialgroups as $specialgroupkey => $specialgrouplabel) {
     }
     $resgroupfilteroptions[] = html_writer::tag('option', s($specialgrouplabel), $attributes);
 }
+$resgroupfilteroptions[] = html_writer::tag('option', 'Otros grupos', array_merge(
+    ['value' => $othergroupskey],
+    $resgroupfilter === $othergroupskey ? ['selected' => 'selected'] : []
+));
 
 echo $OUTPUT->header();
 
@@ -314,7 +323,7 @@ echo html_writer::tag('select', implode('', $statusoptions), [
 echo html_writer::end_div();
 
 echo html_writer::start_div('aa-filter-field');
-echo html_writer::tag('label', 'Grupo especial', ['for' => 'aa-groupfilter']);
+echo html_writer::tag('label', 'Grupo', ['for' => 'aa-groupfilter']);
 echo html_writer::tag('select', implode('', $groupfilteroptions), [
     'name' => 'groupfilter',
     'id'   => 'aa-groupfilter',
@@ -476,7 +485,7 @@ echo html_writer::tag('select', implode('', $restypeoptions), [
 echo html_writer::end_div();
 
 echo html_writer::start_div('aa-filter-field');
-echo html_writer::tag('label', 'Grupo especial', ['for' => 'aa-resgroupfilter']);
+echo html_writer::tag('label', 'Grupo', ['for' => 'aa-resgroupfilter']);
 echo html_writer::tag('select', implode('', $resgroupfilteroptions), [
     'name' => 'resgroupfilter',
     'id'   => 'aa-resgroupfilter',
