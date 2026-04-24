@@ -107,6 +107,10 @@
     gap: 16px;
     align-items: end;
     margin-bottom: 18px;
+    padding: 18px;
+    border-radius: 18px;
+    border: 1px solid #eaecf0;
+    background: linear-gradient(180deg, #fcfcfe 0%, #f8faff 100%);
 }
 
 .aa-res-filters {
@@ -123,6 +127,10 @@
     color: #344054;
 }
 
+.aa-filter-field {
+    min-width: 0;
+}
+
 .aa-filter-field input[type="text"],
 .aa-filter-field select {
     width: 100%;
@@ -132,6 +140,14 @@
     padding: 10px 14px;
     background: #fff;
     box-sizing: border-box;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.aa-filter-field input[type="text"]:focus,
+.aa-filter-field select:focus {
+    border-color: #6b7ed6;
+    box-shadow: 0 0 0 3px rgba(69, 94, 186, 0.14);
+    outline: none;
 }
 
 .aa-filter-checks {
@@ -158,6 +174,7 @@
     align-items: center;
     justify-content: flex-end;
     flex-wrap: wrap;
+    padding-left: 4px;
 }
 
 .aa-reset-button {
