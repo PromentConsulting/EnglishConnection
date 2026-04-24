@@ -710,6 +710,10 @@ function local_analitica_avanzada_get_user_enrolment_dates(array $userids, int $
     $params['uednow2'] = $now;
     $params['uednow3'] = $now;
     $params['uednow4'] = $now;
+    $params['uednow5'] = $now;
+    $params['uednow6'] = $now;
+    $params['uednow7'] = $now;
+    $params['uednow8'] = $now;
 
     // Aggregate enrolments per user and compute a deterministic status.
     $sql = "SELECT ue.userid,
@@ -738,15 +742,15 @@ function local_analitica_avanzada_get_user_enrolment_dates(array $userids, int $
                    CASE
                        WHEN MAX(
                            CASE
-                               WHEN (ue.timestart = 0 OR ue.timestart <= :uednow1)
-                                AND (ue.timeend = 0 OR ue.timeend >= :uednow2)
+                               WHEN (ue.timestart = 0 OR ue.timestart <= :uednow5)
+                                AND (ue.timeend = 0 OR ue.timeend >= :uednow6)
                                THEN 1 ELSE 0
                            END
                        ) = 1
                        THEN 'active'
-                       WHEN MAX(CASE WHEN ue.timestart > :uednow3 THEN 1 ELSE 0 END) = 1
+                       WHEN MAX(CASE WHEN ue.timestart > :uednow7 THEN 1 ELSE 0 END) = 1
                        THEN 'pending'
-                       WHEN MAX(CASE WHEN ue.timeend > 0 AND ue.timeend < :uednow4 THEN 1 ELSE 0 END) = 1
+                       WHEN MAX(CASE WHEN ue.timeend > 0 AND ue.timeend < :uednow8 THEN 1 ELSE 0 END) = 1
                        THEN 'finished'
                        ELSE 'active'
                    END AS enrolstatus
