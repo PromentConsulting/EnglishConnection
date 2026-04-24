@@ -67,7 +67,7 @@ if (!empty($export) && in_array($export, ['csv', 'xlsx'], true)) {
     ];
 
     $rows = [];
-    $rows[] = ['Nombre', 'Apellidos', 'Usuario', 'Email', 'Última conexión', 'Estado', 'Fecha finalización', 'Calificación media', '% Progreso', 'Tiempo medio sesión', 'Cursos inscritos'];
+    $rows[] = ['Nombre', 'Apellidos', 'Usuario', 'Email', 'Última conexión', 'Estado', 'Fecha finalización', 'Calificación media', '% Progreso', 'Tiempo medio sesión', 'Curso'];
 
     foreach ($allusers as $user) {
         $lastaccess = !empty($user->lastaccess) ? userdate($user->lastaccess, '%d/%m/%Y %H:%M') : 'Nunca';
@@ -76,7 +76,7 @@ if (!empty($export) && in_array($export, ['csv', 'xlsx'], true)) {
         $avggrade = $user->avggrade !== null ? number_format($user->avggrade, 1, ',', '.') . '%' : '—';
         $progress = $user->progress !== null ? number_format($user->progress, 1, ',', '.') . '%' : '—';
         $avgsession = local_analitica_avanzada_format_duration((int) $user->avgsession);
-        $coursenames = !empty($user->courses) ? implode(', ', array_column($user->courses, 'fullname')) : '—';
+        $coursefullname = !empty($user->coursefullname) ? $user->coursefullname : '—';
 
         $rows[] = [
             $user->firstname,
@@ -89,7 +89,7 @@ if (!empty($export) && in_array($export, ['csv', 'xlsx'], true)) {
             $avggrade,
             $progress,
             $avgsession,
-            $coursenames,
+            $coursefullname,
         ];
     }
 
@@ -382,7 +382,7 @@ echo html_writer::tag('tr',
     html_writer::tag('th', 'Calificación media') .
     html_writer::tag('th', '% progreso') .
     html_writer::tag('th', 'Tiempo medio de sesión') .
-    html_writer::tag('th', 'Curso/s inscritos')
+    html_writer::tag('th', 'Curso')
 );
 echo html_writer::end_tag('thead');
 echo html_writer::start_tag('tbody');
@@ -410,7 +410,7 @@ if (!empty($userdata['users'])) {
         echo html_writer::tag('td', html_writer::tag('span', local_analitica_avanzada_format_percent($user->avggrade), ['class' => $gradeclass]));
         echo html_writer::tag('td', html_writer::tag('span', local_analitica_avanzada_format_percent($user->progress), ['class' => $progressclass]));
         echo html_writer::tag('td', html_writer::tag('span', local_analitica_avanzada_format_duration((int) $user->avgsession), ['class' => 'aa-pill']));
-        echo html_writer::tag('td', local_analitica_avanzada_render_course_badges($user->courses));
+        echo html_writer::tag('td', s($user->coursefullname ?? '—'));
         echo html_writer::end_tag('tr');
     }
 } else {
