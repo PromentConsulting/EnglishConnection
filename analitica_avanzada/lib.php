@@ -10,6 +10,181 @@ function local_analitica_avanzada_regular_user_sql(string $alias = 'u'): string 
 }
 
 /**
+ * Group filters based on shared naming conventions across courses.
+ *
+ * @return array<string, string> [joinedname => cleanlabel]
+ */
+function local_analitica_avanzada_get_special_group_filters(): array {
+    return [
+        'alcalaespartales' => 'Alcala espartales',
+        'alcalaestacion' => 'Alcala estacion',
+        'alcalavenecia' => 'Alcala Venecia',
+        'alcorconjuzgados' => 'Alcorcon juzgados',
+        'alicanteensache' => 'Alicante ensache',
+        'alicanteensanche.334' => 'Alicante ensanche',
+        'almeria.28d' => 'Almeria',
+        'arganda.388' => 'Arganda',
+        'arroyomolinos' => 'Arroyomolinos',
+        'avila.2d4' => 'Avila',
+        'alcorcon.retamas' => 'Alcorcon retamas',
+        'alhaurin' => 'Alhaurin',
+        'alicante.pzaamerica' => 'Alicante pza america',
+        'barcelona.poblenou' => 'Barcelona Poblenou',
+        'barcelona.santandreu' => 'Barcelona Sant Andreu',
+        'benalmadena' => 'Benalmadena',
+        'burgos' => 'Burgos',
+        'canaveral' => 'Canaveral',
+        'carmona' => 'Carmona',
+        'castilleja' => 'Castilleja',
+        'cordoba.arroyodelmoro' => 'Cordoba Arroyo del Moro',
+        'cordoba.starosa' => 'Cordoba Sta Rosa',
+        'coslada' => 'Coslada',
+        'doshermanas' => 'Dos Hermanas',
+        'entrenucleos' => 'Entrenucleos',
+        'espartinas' => 'Espartinas',
+        'getafe.buenavista' => 'Getafe Buenavista',
+        'getafe.molinos' => 'Getafe Molinos',
+        'getafe.norte' => 'Getafe Norte',
+        'hospitalet.collblanc' => 'Hospitalet Collblanc',
+        'hospitalet.pubillacases' => 'Hospitalet Pubilla Cases',
+        'laalgaba' => 'La Algaba',
+        'laspalmas' => 'Las Palmas',
+        'leganessolagua' => 'Leganes Solagua',
+        'lospalacios' => 'Los Palacios',
+        'madrid.ensanchevallecas' => 'Madrid Ensanche Vallecas',
+        'madrid.losrosales' => 'Madrid Los Rosales',
+        'madrid.lucero' => 'Madrid Lucero',
+        'madrid.pueblonuevo' => 'Madrid Pueblo Nuevo',
+        'madrid.sanblas' => 'Madrid San Blas',
+        'madrid.tetuan' => 'Madrid Tetuan',
+        'madridcanillejas' => 'Madrid Canillejas',
+        'malaga.aveuropa' => 'Malaga Av Europa',
+        'mataro' => 'Mataro',
+        'mostoles.pau' => 'Mostoles Pau',
+        'paiporta' => 'Paiporta',
+        'palomares' => 'Palomares',
+        'pilas' => 'Pilas',
+        'puertodelatorre' => 'Puerto de la Torre',
+        'ripollet' => 'Ripollet',
+        'rivas' => 'Rivas',
+        'sanmartinvega' => 'San Martin de la Vega',
+        'sevilla.bermejales' => 'Sevilla Bermejales',
+        'sevilla.caguila' => 'Sevilla C Aguila',
+        'sevilla.centro' => 'Sevilla Centro',
+        'sevilla.este' => 'Sevilla Este',
+        'sevilla.este.ciencia' => 'Sevilla Este Ciencia',
+        'sevilla.macarena' => 'Sevilla Macarena',
+        'sevilla.remedios' => 'Sevilla Remedios',
+        'sevillaparsi' => 'Sevilla Parsi',
+        'tenerife' => 'Tenerife',
+        'tomares' => 'Tomares',
+        'torrejonparqueeuropa' => 'Torrejon Parque Europa',
+        'valdemoro.hospital' => 'Valdemoro Hospital',
+        'badajozvaldepasillas.245' => 'Badajoz valdepasillas',
+        'badalona.17a' => 'Badalona',
+        'barcelonanoubarris' => 'Barcelona Nou Barris',
+        'barcelonasagradafamilia' => 'Barcelona Sagrada Familia',
+        'benetusser.2ca' => 'Benetusser',
+        'boadilla' => 'Boadilla',
+        'business' => 'Business',
+        'camas.67a' => 'Camas',
+        'carabanchelbuenavista' => 'Carabanchel Buenavista',
+        'carabanchelvistaalegre.38e' => 'Carabanchel Vista Alegre',
+        'coriadelrio.304' => 'Coria del Rio',
+        'cornella.865' => 'Cornella',
+        'craiova.6ef' => 'Craiova',
+        'empresas' => 'Empresas',
+        'esplugues.3ad' => 'Esplugues',
+        'fuenlabradaarroyo' => 'Fuenlabrada Arroyo',
+        'fuenlabradaloranca' => 'Fuenlabrada Loranca',
+        'fuenlabradaserna' => 'Fuenlabrada Serna',
+        'fuenlabradavivero.5b' => 'Fuenlabrada Vivero',
+        'getafebercial' => 'Getafe Bercial',
+        'getafecentro' => 'Getafe Centro',
+        'getafejuancierva' => 'Getafe Juan Cierva',
+        'getafesector3' => 'Getafe Sector 3',
+        'granadavergeles.7a' => 'Granada Vergeles',
+        'huelvaadoratrices' => 'Huelva Adoratrices',
+        'huelvacentro.1b9' => 'Huelva Centro',
+        'huelvapescaderia.3a9' => 'Huelva Pescaderia',
+        'humanes' => 'Humanes',
+        'jerez.207' => 'Jerez',
+        'leganescarrascal' => 'Leganes Carrascal',
+        'leganescentro' => 'Leganes Centro',
+        'leganessolagua.311' => 'Leganes Solagua',
+        'madrid4caminos' => 'Madrid 4 Caminos',
+        'madridalbufera' => 'Madrid Albufera',
+        'madridarganzuela' => 'Madrid Arganzuela',
+        'madridchaminade' => 'Madrid Chaminade',
+        'madridciudadangeles' => 'Madrid Ciudad Angeles',
+        'madridespinillo' => 'Madrid Espinillo',
+        'madridlasrosas.22f' => 'Madrid Las Rosas',
+        'madridmoncloa.118' => 'Madrid Moncloa',
+        'madridmoratalaz' => 'Madrid Moratalaz',
+        'madridpalomeras.f3' => 'Madrid Palomeras',
+        'madridpinardelrey.211' => 'Madrid Pinar del Rey',
+        'madridptevallecas.1c4' => 'Madrid Pte Vallecas',
+        'madridvaldebernardo' => 'Madrid Valdebernardo',
+        'majadahonda' => 'Majadahonda',
+        'malagapalo.110' => 'Malaga Palo',
+        'malagateatinos.311' => 'Malaga Teatinos',
+        'mataroelsmolins.b' => 'Mataro Els Molins',
+        'mejorada.23f' => 'Mejorada',
+        'merida.192' => 'Merida',
+        'montequinto.238' => 'Montequinto',
+        'mostolesestoril' => 'Mostoles Estoril',
+        'mostolespradillo' => 'Mostoles Pradillo',
+        'mostolessoto.fd' => 'Mostoles Soto',
+        'navalcarnero' => 'Navalcarnero',
+        'online' => 'Online',
+        'palmamallorca' => 'Palma Mallorca',
+        'parlacentro' => 'Parla Centro',
+        'parlasur' => 'Parla Sur',
+        'pintoprado' => 'Pinto Prado',
+        'pintoteneria' => 'Pinto Teneria',
+        'sesena' => 'Sesena',
+        'sevillabami.2e1' => 'Sevilla Bami',
+        'sevillagranplaza.774' => 'Sevilla Gran Plaza',
+        'sevillalasalle.34b' => 'Sevilla La Salle',
+        'sevillaparquealcosa' => 'Sevilla Parque Alcosa',
+        'sevillapinomontano.93' => 'Sevilla Pino Montano',
+        'sevillareinamercedes.e79' => 'Sevilla Reina Mercedes',
+        'sevillasanjeronimo.993' => 'Sevilla San Jeronimo',
+        'sevillastajusta.ff' => 'Sevilla Sta Justa',
+        'sevillatharsis.31d' => 'Sevilla Tharsis',
+        'sevillatriana.23e' => 'Sevilla Triana',
+        'sevillaviapol' => 'Sevilla Viapol',
+        'sjaznalfarache.18b' => 'San Juan de Aznalfarache',
+        'sjrinconada.11b' => 'San Jose de la Rinconada',
+        'tampico.315' => 'Tampico',
+        'testgroup' => 'Testgroup',
+        'tetouan.65' => 'Tetouan',
+        'toledo' => 'Toledo',
+        'torrejon.9c' => 'Torrejon',
+        'umbrete.1ed' => 'Umbrete',
+        'utrera.21e' => 'Utrera',
+        'valdemoro.312' => 'Valdemoro',
+        'valladolid.cc' => 'Valladolid',
+        'villaverdealto' => 'Villaverde Alto',
+        'villaverdebajo' => 'Villaverde Bajo',
+    ];
+}
+
+/**
+ * Normalize a group filter key for matching.
+ */
+function local_analitica_avanzada_normalize_group_filter_key(string $value): string {
+    return preg_replace('/[^a-z0-9]/', '', core_text::strtolower($value));
+}
+
+/**
+ * SQL expression to normalize group names before matching.
+ */
+function local_analitica_avanzada_group_name_normalized_sql(string $field = 'g.name'): string {
+    return "LOWER(REPLACE(REPLACE(REPLACE(REPLACE({$field}, '-', ''), ' ', ''), '.', ''), '_', ''))";
+}
+
+/**
  * Access control: only managers and eczonedirectors.
  */
 function local_analitica_avanzada_user_can_view(?int $userid = null): bool {
@@ -854,6 +1029,18 @@ function local_analitica_avanzada_get_filtered_users(array $filters, int $page =
         $params['filtercourseid'] = (int) $filters['courseid'];
     }
 
+    $specialgroups = local_analitica_avanzada_get_special_group_filters();
+    $groupfilter = trim((string) ($filters['groupfilter'] ?? ''));
+    if ($groupfilter !== '' && array_key_exists($groupfilter, $specialgroups)) {
+        $joins[] = "JOIN (
+                        SELECT DISTINCT gm.userid
+                          FROM {groups_members} gm
+                          JOIN {groups} g ON g.id = gm.groupid
+                         WHERE " . local_analitica_avanzada_group_name_normalized_sql('g.name') . " LIKE :groupfilterneedle
+                    ) gf ON gf.userid = u.id";
+        $params['groupfilterneedle'] = '%' . local_analitica_avanzada_normalize_group_filter_key($groupfilter) . '%';
+    }
+
     if (!empty($filters['inactiveonly'])) {
         $where[] = '(u.lastaccess = 0 OR u.lastaccess < :inactivecutoff)';
         $params['inactivecutoff'] = time() - (7 * DAYSECS);
@@ -1034,7 +1221,7 @@ function local_analitica_avanzada_render_course_badges(array $courses): string {
 /**
  * Most visited activities/resources from the last 30 days (students only).
  */
-function local_analitica_avanzada_get_top_resources(int $limit = 20, int $courseid = 0, array $scope = null, string $moduletype = ''): array {
+function local_analitica_avanzada_get_top_resources(int $limit = 20, int $courseid = 0, array $scope = null, string $moduletype = '', string $groupfilter = ''): array {
     global $DB;
 
     $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
@@ -1086,6 +1273,19 @@ function local_analitica_avanzada_get_top_resources(int $limit = 20, int $course
     if (!empty($moduletype)) {
         $conditions[] = 'mo.name = :moduletypefilter';
         $params['moduletypefilter'] = $moduletype;
+    }
+
+    $groupfilter = trim($groupfilter);
+    $specialgroups = local_analitica_avanzada_get_special_group_filters();
+    if ($groupfilter !== '' && array_key_exists($groupfilter, $specialgroups)) {
+        $conditions[] = "EXISTS (
+            SELECT 1
+              FROM {groups_members} gm
+              JOIN {groups} g ON g.id = gm.groupid
+             WHERE gm.userid = l.userid
+               AND " . local_analitica_avanzada_group_name_normalized_sql('g.name') . " LIKE :resgroupfilterneedle
+        )";
+        $params['resgroupfilterneedle'] = '%' . local_analitica_avanzada_normalize_group_filter_key($groupfilter) . '%';
     }
 
     $params += [
@@ -1195,7 +1395,7 @@ function local_analitica_avanzada_student_role_sql_log(string $useralias = 'u_re
 /**
  * Get all module types available in the log for filter dropdown.
  */
-function local_analitica_avanzada_get_resource_module_types(int $courseid = 0, array $scope = null): array {
+function local_analitica_avanzada_get_resource_module_types(int $courseid = 0, array $scope = null, string $groupfilter = ''): array {
     global $DB;
 
     $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
@@ -1237,6 +1437,19 @@ function local_analitica_avanzada_get_resource_module_types(int $courseid = 0, a
     } else if (!empty($courseid)) {
         $conditions[] = 'cm.course = :mtcourseid';
         $params['mtcourseid'] = $courseid;
+    }
+
+    $groupfilter = trim($groupfilter);
+    $specialgroups = local_analitica_avanzada_get_special_group_filters();
+    if ($groupfilter !== '' && array_key_exists($groupfilter, $specialgroups)) {
+        $conditions[] = "EXISTS (
+            SELECT 1
+              FROM {groups_members} gm
+              JOIN {groups} g ON g.id = gm.groupid
+             WHERE gm.userid = l.userid
+               AND " . local_analitica_avanzada_group_name_normalized_sql('g.name') . " LIKE :mtgroupfilterneedle
+        )";
+        $params['mtgroupfilterneedle'] = '%' . local_analitica_avanzada_normalize_group_filter_key($groupfilter) . '%';
     }
 
     $sql = "SELECT DISTINCT mo.name
