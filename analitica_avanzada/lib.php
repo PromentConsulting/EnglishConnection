@@ -641,8 +641,14 @@ function local_analitica_avanzada_get_courses_for_filter(array $scope = null): a
     global $DB;
 
     $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
-    $params = ['siteid' => SITEID];
-    $conditions = ['c.id <> :siteid'];
+    $params = [
+        'siteid' => SITEID,
+        'supportmaterialsname' => 'support materials',
+    ];
+    $conditions = [
+        'c.id <> :siteid',
+        'LOWER(c.fullname) <> :supportmaterialsname',
+    ];
 
     if (!empty($scope['restricted'])) {
         $courseids = local_analitica_avanzada_get_scoped_course_ids($scope);
@@ -661,6 +667,14 @@ function local_analitica_avanzada_get_courses_for_filter(array $scope = null): a
           ORDER BY c.fullname ASC";
 
     return $DB->get_records_sql_menu($sql, $params);
+}
+
+/**
+ * SQL condition to exclude the Support Materials course.
+ */
+function local_analitica_avanzada_support_materials_exclusion_sql(string $coursefield, string $paramname, array &$params): string {
+    $params[$paramname] = 'support materials';
+    return "LOWER({$coursefield}) <> :{$paramname}";
 }
 
 /**
@@ -1053,11 +1067,19 @@ function local_analitica_avanzada_get_filtered_users(array $filters, int $page =
     global $DB;
 
     $scope = $scope ?? local_analitica_avanzada_get_dashboard_scope();
-    $params = [];
-    $joins = [];
+    $now = time();
+    $params = [
+        'statusnow1' => $now,
+        'statusnow2' => $now,
+        'statusnow3' => $now,
+        'statusnow4' => $now,
+    ];
     $where = [
         local_analitica_avanzada_regular_user_sql('u'),
         local_analitica_avanzada_student_role_sql('u'),
+        'ue.status = 0',
+        'e.status = 0',
+        local_analitica_avanzada_support_materials_exclusion_sql('c.fullname', 'exclude_support_materials', $params),
     ];
 
     if (!empty($scope['restricted'])) {
@@ -1068,24 +1090,19 @@ function local_analitica_avanzada_get_filtered_users(array $filters, int $page =
         }
 
         [$userinsql, $userparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'scopeusr');
-        $params += $userparams;
+        [$courseinsql, $courseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'scopecrs');
+        $params += $userparams + $courseparams;
         $where[] = "u.id {$userinsql}";
+        $where[] = "e.courseid {$courseinsql}";
     }
 
     if (!empty($filters['courseid'])) {
-        if (!empty($scope['restricted']) && !in_array((int) $filters['courseid'], local_analitica_avanzada_get_scoped_course_ids($scope), true)) {
+        $selectedcourseid = (int) $filters['courseid'];
+        if (!empty($scope['restricted']) && !in_array($selectedcourseid, local_analitica_avanzada_get_scoped_course_ids($scope), true)) {
             return ['total' => 0, 'users' => []];
         }
-
-        $joins[] = "JOIN (
-                        SELECT DISTINCT ue.userid
-                          FROM {user_enrolments} ue
-                          JOIN {enrol} e ON e.id = ue.enrolid
-                         WHERE ue.status = 0
-                           AND e.status = 0
-                           AND e.courseid = :filtercourseid
-                    ) ec ON ec.userid = u.id";
-        $params['filtercourseid'] = (int) $filters['courseid'];
+        $where[] = 'e.courseid = :filtercourseid';
+        $params['filtercourseid'] = $selectedcourseid;
     }
 
     $groupfilter = (string) ($filters['groupfilter'] ?? '');
@@ -1100,86 +1117,22 @@ function local_analitica_avanzada_get_filtered_users(array $filters, int $page =
     }
 
     if (!empty($filters['lowgradeonly'])) {
-        $joins[] = "JOIN (
-                        SELECT gg.userid,
-                               AVG(
-                                   CASE
-                                       WHEN (gi.grademax - gi.grademin) > 0
-                                       THEN (gg.finalgrade - gi.grademin) / (gi.grademax - gi.grademin)
-                                       ELSE NULL
-                                   END
-                               ) AS avggrade
-                          FROM {grade_grades} gg
-                          JOIN {grade_items} gi ON gi.id = gg.itemid
-                          JOIN {user} ug ON ug.id = gg.userid
-                         WHERE gi.itemtype = 'course'
-                           AND gg.finalgrade IS NOT NULL
-                           AND " . local_analitica_avanzada_regular_user_sql('ug');
-        if (!empty($scope['restricted'])) {
-            [$gradecourseinsql, $gradecourseparams] = $DB->get_in_or_equal(local_analitica_avanzada_get_scoped_course_ids($scope), SQL_PARAMS_NAMED, 'lgcrs');
-            $params += $gradecourseparams;
-            $joins[count($joins) - 1] .= "
-                           AND gi.courseid {$gradecourseinsql}";
-        }
-        $joins[count($joins) - 1] .= "
-                      GROUP BY gg.userid
-                    ) lg ON lg.userid = u.id";
-        $where[] = 'lg.avggrade < :lowgrademax';
+        $where[] = "(
+            SELECT AVG(
+                CASE
+                    WHEN (gi.grademax - gi.grademin) > 0
+                    THEN (gg.finalgrade - gi.grademin) / (gi.grademax - gi.grademin)
+                    ELSE NULL
+                END
+            )
+              FROM {grade_grades} gg
+              JOIN {grade_items} gi ON gi.id = gg.itemid
+             WHERE gi.itemtype = 'course'
+               AND gg.finalgrade IS NOT NULL
+               AND gg.userid = u.id
+               AND gi.courseid = c.id
+        ) < :lowgrademax";
         $params['lowgrademax'] = 0.5;
-    }
-
-    // Status filter via enrolment dates.
-    $statusfilter = $filters['status'] ?? '';
-    if (!empty($statusfilter) && in_array($statusfilter, ['pending', 'active', 'finished'], true)) {
-        $now = time();
-        $statuswhere = [
-            'ue.status = 0',
-            'e.status = 0',
-        ];
-        $statusparams = [
-            'statusnow1' => $now,
-            'statusnow2' => $now,
-            'statusnow3' => $now,
-            'statusnow4' => $now,
-        ];
-
-        $selectedcourseid = (int) ($filters['courseid'] ?? 0);
-        if (!empty($selectedcourseid)) {
-            $statuswhere[] = 'e.courseid = :statuscourseid';
-            $statusparams['statuscourseid'] = $selectedcourseid;
-        } else if (!empty($scope['restricted'])) {
-            [$statuscourseinsql, $statuscourseparams] = $DB->get_in_or_equal(local_analitica_avanzada_get_scoped_course_ids($scope), SQL_PARAMS_NAMED, 'statuscrs');
-            $statuswhere[] = "e.courseid {$statuscourseinsql}";
-            $statusparams += $statuscourseparams;
-        }
-
-        $statushaving = '';
-        if ($statusfilter === 'active') {
-            $statushaving = "HAVING MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow1)
-                                           AND (ue.timeend = 0 OR ue.timeend >= :statusnow2)
-                                      THEN 1 ELSE 0 END) = 1";
-        } else if ($statusfilter === 'pending') {
-            $statushaving = "HAVING MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow1)
-                                           AND (ue.timeend = 0 OR ue.timeend >= :statusnow2)
-                                      THEN 1 ELSE 0 END) = 0
-                                AND MAX(CASE WHEN ue.timestart > :statusnow3 THEN 1 ELSE 0 END) = 1";
-        } else if ($statusfilter === 'finished') {
-            $statushaving = "HAVING MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow1)
-                                           AND (ue.timeend = 0 OR ue.timeend >= :statusnow2)
-                                      THEN 1 ELSE 0 END) = 0
-                                AND MAX(CASE WHEN ue.timestart > :statusnow3 THEN 1 ELSE 0 END) = 0
-                                AND MAX(CASE WHEN ue.timeend > 0 AND ue.timeend < :statusnow4 THEN 1 ELSE 0 END) = 1";
-        }
-
-        $joins[] = "JOIN (
-                        SELECT ue.userid
-                          FROM {user_enrolments} ue
-                          JOIN {enrol} e ON e.id = ue.enrolid
-                         WHERE " . implode(' AND ', $statuswhere) . "
-                      GROUP BY ue.userid
-                        {$statushaving}
-                    ) stf ON stf.userid = u.id";
-        $params += $statusparams;
     }
 
     if (!empty($filters['search'])) {
@@ -1202,49 +1155,160 @@ function local_analitica_avanzada_get_filtered_users(array $filters, int $page =
         $params['searchusername'] = $searchparam;
     }
 
-    $fromsql = '{user} u ' . implode(' ', $joins);
-    $wheresql = implode(' AND ', $where);
+    $statusfilter = $filters['status'] ?? '';
+    $having = '';
+    if (!empty($statusfilter) && in_array($statusfilter, ['pending', 'active', 'finished'], true)) {
+        if ($statusfilter === 'active') {
+            $having = "HAVING MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow1)
+                                      AND (ue.timeend = 0 OR ue.timeend >= :statusnow2)
+                                 THEN 1 ELSE 0 END) = 1";
+        } else if ($statusfilter === 'pending') {
+            $having = "HAVING MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow1)
+                                      AND (ue.timeend = 0 OR ue.timeend >= :statusnow2)
+                                 THEN 1 ELSE 0 END) = 0
+                           AND MAX(CASE WHEN ue.timestart > :statusnow3 THEN 1 ELSE 0 END) = 1";
+        } else if ($statusfilter === 'finished') {
+            $having = "HAVING MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow1)
+                                      AND (ue.timeend = 0 OR ue.timeend >= :statusnow2)
+                                 THEN 1 ELSE 0 END) = 0
+                           AND MAX(CASE WHEN ue.timestart > :statusnow3 THEN 1 ELSE 0 END) = 0
+                           AND MAX(CASE WHEN ue.timeend > 0 AND ue.timeend < :statusnow4 THEN 1 ELSE 0 END) = 1";
+        }
+    }
 
-    $countsql = "SELECT COUNT(DISTINCT u.id)
-                   FROM {$fromsql}
-                  WHERE {$wheresql}";
+    $basesql = "FROM {user_enrolments} ue
+                JOIN {enrol} e ON e.id = ue.enrolid
+                JOIN {course} c ON c.id = e.courseid
+                JOIN {user} u ON u.id = ue.userid
+               WHERE " . implode(' AND ', $where);
+
+    $groupsql = " GROUP BY u.id, u.firstname, u.lastname, u.username, u.email, u.lastaccess, c.id, c.fullname";
+
+    $countsql = "SELECT COUNT(1) FROM (
+                    SELECT u.id, c.id
+                      {$basesql}
+                      {$groupsql}
+                      {$having}
+                 ) rows";
     $total = (int) $DB->count_records_sql($countsql, $params);
 
-    $sql = "SELECT DISTINCT u.id, u.firstname, u.lastname, u.username, u.email, u.lastaccess
-              FROM {$fromsql}
-             WHERE {$wheresql}
-          ORDER BY u.lastname ASC, u.firstname ASC";
+    $sql = "SELECT u.id, u.firstname, u.lastname, u.username, u.email, u.lastaccess,
+                   c.id AS courseid,
+                   c.fullname AS coursename,
+                   MIN(ue.timestart) AS timestart,
+                   CASE
+                       WHEN MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow1)
+                                      AND (ue.timeend = 0 OR ue.timeend >= :statusnow2)
+                                 THEN 1 ELSE 0 END) = 1
+                       THEN MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow3) AND ue.timeend > 0
+                                     THEN ue.timeend ELSE 0 END)
+                       ELSE MAX(CASE WHEN ue.timeend > 0 AND ue.timeend < :statusnow4
+                                     THEN ue.timeend ELSE 0 END)
+                   END AS timeend,
+                   CASE
+                       WHEN MAX(CASE WHEN (ue.timestart = 0 OR ue.timestart <= :statusnow1)
+                                      AND (ue.timeend = 0 OR ue.timeend >= :statusnow2)
+                                 THEN 1 ELSE 0 END) = 1
+                       THEN 'active'
+                       WHEN MAX(CASE WHEN ue.timestart > :statusnow3 THEN 1 ELSE 0 END) = 1
+                       THEN 'pending'
+                       WHEN MAX(CASE WHEN ue.timeend > 0 AND ue.timeend < :statusnow4 THEN 1 ELSE 0 END) = 1
+                       THEN 'finished'
+                       ELSE 'active'
+                   END AS enrolstatus
+              {$basesql}
+              {$groupsql}
+              {$having}
+          ORDER BY u.lastname ASC, u.firstname ASC, c.fullname ASC";
 
     $records = $DB->get_records_sql($sql, $params, $page * $perpage, $perpage);
     $users = array_values($records);
-    $userids = array_map(static function($user) {
+    $userids = array_values(array_unique(array_map(static function($user) {
         return (int) $user->id;
-    }, $users);
+    }, $users)));
+    $courseids = array_values(array_unique(array_map(static function($user) {
+        return (int) $user->courseid;
+    }, $users)));
 
-    $selectedcourseid = (int) ($filters['courseid'] ?? 0);
-    $grades = local_analitica_avanzada_get_user_average_grades($userids, $scope, $selectedcourseid);
-    $progress = local_analitica_avanzada_get_user_progress($userids, $selectedcourseid, $scope);
-    $courses = local_analitica_avanzada_get_user_courses($userids, $scope, $selectedcourseid);
     $sessions = local_analitica_avanzada_get_user_session_times($userids, time() - (30 * DAYSECS));
-    $enrolments = local_analitica_avanzada_get_user_enrolment_dates($userids, $selectedcourseid, $scope);
+    $gradesbykey = [];
+    $progressbykey = [];
+
+    if (!empty($userids) && !empty($courseids)) {
+        [$gradeuserinsql, $gradeuserparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'gukusr');
+        [$gradecourseinsql, $gradecourseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'gukcrs');
+        $gradeparams = $gradeuserparams + $gradecourseparams;
+        $gradesql = "SELECT gg.userid,
+                            gi.courseid,
+                            AVG(
+                                CASE
+                                    WHEN (gi.grademax - gi.grademin) > 0
+                                    THEN (gg.finalgrade - gi.grademin) / (gi.grademax - gi.grademin)
+                                    ELSE NULL
+                                END
+                            ) AS avggrade
+                       FROM {grade_grades} gg
+                       JOIN {grade_items} gi ON gi.id = gg.itemid
+                      WHERE gi.itemtype = 'course'
+                        AND gg.finalgrade IS NOT NULL
+                        AND gg.userid {$gradeuserinsql}
+                        AND gi.courseid {$gradecourseinsql}
+                   GROUP BY gg.userid, gi.courseid";
+        $graderecords = $DB->get_records_sql($gradesql, $gradeparams);
+        foreach ($graderecords as $graderecord) {
+            $gradesbykey[(int) $graderecord->userid . ':' . (int) $graderecord->courseid] =
+                $graderecord->avggrade !== null ? ((float) $graderecord->avggrade * 100) : null;
+        }
+
+        [$proguserinsql, $proguserparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'pgkusr');
+        [$progcourseinsql, $progcourseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'pgkcrs');
+        $progressparams = $proguserparams + $progcourseparams;
+        $progresssql = "SELECT uc.userid,
+                               uc.courseid,
+                               COUNT(cm.id) AS totalmodules,
+                               SUM(CASE WHEN cmc.completionstate > 0 THEN 1 ELSE 0 END) AS completedmodules
+                          FROM (
+                                SELECT DISTINCT ue.userid, e.courseid
+                                  FROM {user_enrolments} ue
+                                  JOIN {enrol} e ON e.id = ue.enrolid
+                                 WHERE ue.status = 0
+                                   AND e.status = 0
+                                   AND ue.userid {$proguserinsql}
+                                   AND e.courseid {$progcourseinsql}
+                               ) uc
+                          JOIN {course_modules} cm
+                            ON cm.course = uc.courseid
+                           AND cm.completion > 0
+                           AND cm.deletioninprogress = 0
+                     LEFT JOIN {course_modules_completion} cmc
+                            ON cmc.coursemoduleid = cm.id
+                           AND cmc.userid = uc.userid
+                      GROUP BY uc.userid, uc.courseid";
+        $progressrecords = $DB->get_records_sql($progresssql, $progressparams);
+        foreach ($progressrecords as $progressrecord) {
+            $progresskey = (int) $progressrecord->userid . ':' . (int) $progressrecord->courseid;
+            if ((int) $progressrecord->totalmodules > 0) {
+                $progressbykey[$progresskey] = ((int) $progressrecord->completedmodules / (int) $progressrecord->totalmodules) * 100;
+            } else {
+                $progressbykey[$progresskey] = null;
+            }
+        }
+    }
 
     foreach ($users as $user) {
         $userid = (int) $user->id;
-        $user->avggrade = $grades[$userid] ?? null;
-        $user->progress = $progress[$userid] ?? null;
-        $user->courses = $courses[$userid] ?? [];
+        $courseid = (int) $user->courseid;
+        $statskey = $userid . ':' . $courseid;
+        $user->avggrade = $gradesbykey[$statskey] ?? null;
+        $user->progress = $progressbykey[$statskey] ?? null;
+        $user->courses = [[
+            'id' => $courseid,
+            'fullname' => $user->coursename,
+        ]];
         $user->avgsession = $sessions[$userid] ?? 0;
-
-        $enrol = $enrolments[$userid] ?? ['timestart' => 0, 'timeend' => 0];
-        $user->timestart = $enrol['timestart'];
-        $user->timeend = $enrol['timeend'];
-        $user->enrolstatus = $enrol['enrolstatus'] ?? local_analitica_avanzada_get_enrolment_status($enrol['timestart'], $enrol['timeend']);
     }
 
-    return [
-        'total' => $total,
-        'users' => $users,
-    ];
+    return ['total' => $total, 'users' => $users];
 }
 
 /**
