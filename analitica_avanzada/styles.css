@@ -103,9 +103,14 @@
 
 .aa-filters {
     display: grid;
-    grid-template-columns: 2fr 1.2fr 1.4fr auto;
+    grid-template-columns: 2fr 1.2fr 1fr 1.4fr auto;
     gap: 16px;
     align-items: end;
+    margin-bottom: 18px;
+}
+
+.aa-res-filters {
+    grid-template-columns: 2fr 1.4fr auto;
     margin-bottom: 18px;
 }
 
@@ -241,6 +246,38 @@
     color: #175cd3;
 }
 
+.aa-pill-success {
+    background: #ecfdf3;
+    color: #027a48;
+}
+
+.aa-pill-muted {
+    background: #f2f4f7;
+    color: #667085;
+}
+
+/* Export bar */
+.aa-export-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid #eaecf0;
+}
+
+.aa-export-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #344054;
+}
+
+.aa-export-btn {
+    border-radius: 12px;
+    font-size: 0.88rem;
+    padding: 8px 16px;
+}
+
 @media (max-width: 1200px) {
     .aa-grid-cards {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -249,11 +286,16 @@
     .aa-filters {
         grid-template-columns: 1fr 1fr;
     }
+
+    .aa-res-filters {
+        grid-template-columns: 1fr 1fr;
+    }
 }
 
 @media (max-width: 767px) {
     .aa-grid-cards,
-    .aa-filters {
+    .aa-filters,
+    .aa-res-filters {
         grid-template-columns: 1fr;
     }
 
@@ -268,5 +310,9 @@
     .aa-results-meta {
         flex-direction: column;
         align-items: flex-start;
+    }
+
+    .aa-export-bar {
+        flex-wrap: wrap;
     }
 }
