@@ -34,10 +34,8 @@ $perpage     = 25;
 // Resources section filters.
 $rescourse   = optional_param('rescourse', 0, PARAM_INT);
 $restype     = optional_param('restype', '', PARAM_ALPHANUMEXT);
-$resgroupfilter = optional_param('resgroupfilter', '', PARAM_TEXT);
 
 $groupfilter = core_text::strtolower(trim($groupfilter));
-$resgroupfilter = core_text::strtolower(trim($resgroupfilter));
 
 // Export action.
 $export      = optional_param('export', '', PARAM_ALPHA);
@@ -141,8 +139,8 @@ if (!empty($export) && in_array($export, ['csv', 'xlsx'], true)) {
 
 $metrics  = local_analitica_avanzada_get_global_metrics($scope);
 $userdata = local_analitica_avanzada_get_filtered_users($filters, $page, $perpage, $scope);
-$resources = local_analitica_avanzada_get_top_resources(20, $rescourse, $scope, $restype, $resgroupfilter);
-$moduletypes = local_analitica_avanzada_get_resource_module_types($rescourse, $scope, $resgroupfilter);
+$resources = local_analitica_avanzada_get_top_resources(20, $rescourse, $scope, $restype, '');
+$moduletypes = local_analitica_avanzada_get_resource_module_types($rescourse, $scope, '');
 
 $baseparams = [];
 if ($search !== '') {
@@ -213,18 +211,6 @@ $groupfilteroptions[] = html_writer::tag('option', 'Otros grupos', array_merge(
     $groupfilter === $othergroupskey ? ['selected' => 'selected'] : []
 ));
 
-$resgroupfilteroptions = [html_writer::tag('option', 'Todos los grupos', ['value' => ''])];
-foreach ($specialgroups as $specialgroupkey => $specialgrouplabel) {
-    $attributes = ['value' => $specialgroupkey];
-    if ($specialgroupkey === $resgroupfilter) {
-        $attributes['selected'] = 'selected';
-    }
-    $resgroupfilteroptions[] = html_writer::tag('option', s($specialgrouplabel), $attributes);
-}
-$resgroupfilteroptions[] = html_writer::tag('option', 'Otros grupos', array_merge(
-    ['value' => $othergroupskey],
-    $resgroupfilter === $othergroupskey ? ['selected' => 'selected'] : []
-));
 
 echo $OUTPUT->header();
 
@@ -484,21 +470,13 @@ echo html_writer::tag('select', implode('', $restypeoptions), [
 ]);
 echo html_writer::end_div();
 
-echo html_writer::start_div('aa-filter-field');
-echo html_writer::tag('label', 'Grupo', ['for' => 'aa-resgroupfilter']);
-echo html_writer::tag('select', implode('', $resgroupfilteroptions), [
-    'name' => 'resgroupfilter',
-    'id'   => 'aa-resgroupfilter',
-]);
-echo html_writer::end_div();
-
 echo html_writer::start_div('aa-filter-actions');
 echo html_writer::empty_tag('input', [
     'type'  => 'submit',
     'class' => 'btn btn-primary',
     'value' => 'Filtrar recursos',
 ]);
-if (!empty($rescourse) || !empty($restype) || !empty($resgroupfilter)) {
+if (!empty($rescourse) || !empty($restype)) {
     $clearresurl = new moodle_url('/local/analitica_avanzada/analitica_avanzada.php', $baseparams);
     echo html_writer::link($clearresurl, 'Limpiar', ['class' => 'btn btn-secondary aa-reset-button']);
 }
