@@ -2,9 +2,6 @@
 
 require_once(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/lib.php');
-if (file_exists($CFG->libdir . '/dataformatlib.php')) {
-    require_once($CFG->libdir . '/dataformatlib.php');
-}
 
 require_login();
 
@@ -70,7 +67,7 @@ if (!empty($export) && in_array($export, ['csv', 'xlsx'], true)) {
     ];
 
     $rows = [];
-    $rows[] = ['Nombre', 'Apellidos', 'Usuario', 'Email', 'Última conexión', 'Estado', 'Fecha finalización', 'Calificación media', '% Progreso', 'Tiempo medio sesión', 'Curso'];
+    $rows[] = ['Nombre', 'Apellidos', 'Usuario', 'Email', 'Última conexión', 'Estado', 'Fecha finalización', 'Calificación media', '% Progreso', 'Tiempo medio sesión', 'Cursos inscritos'];
 
     foreach ($allusers as $user) {
         $lastaccess = !empty($user->lastaccess) ? userdate($user->lastaccess, '%d/%m/%Y %H:%M') : 'Nunca';
@@ -79,7 +76,7 @@ if (!empty($export) && in_array($export, ['csv', 'xlsx'], true)) {
         $avggrade = $user->avggrade !== null ? number_format($user->avggrade, 1, ',', '.') . '%' : '—';
         $progress = $user->progress !== null ? number_format($user->progress, 1, ',', '.') . '%' : '—';
         $avgsession = local_analitica_avanzada_format_duration((int) $user->avgsession);
-        $coursename = !empty($user->courses) ? (string) $user->courses[0]['fullname'] : '—';
+        $coursenames = !empty($user->courses) ? implode(', ', array_column($user->courses, 'fullname')) : '—';
 
         $rows[] = [
             $user->firstname,
@@ -92,23 +89,51 @@ if (!empty($export) && in_array($export, ['csv', 'xlsx'], true)) {
             $avggrade,
             $progress,
             $avgsession,
-            $coursename,
+            $coursenames,
         ];
     }
 
-    $columns = array_shift($rows);
-    $columns = array_values($columns);
-    $formattedrows = [];
-    foreach ($rows as $row) {
-        $formattedrows[] = array_values($row);
+    if ($export === 'csv') {
+        header('Content-Type: text/csv; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="analitica_usuarios_' . date('Ymd_His') . '.csv"');
+        header('Pragma: no-cache');
+        $out = fopen('php://output', 'w');
+        fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // BOM for Excel UTF-8.
+        foreach ($rows as $row) {
+            fputcsv($out, $row, ';');
+        }
+        fclose($out);
+        exit;
     }
 
-    \core\dataformat::download_data(
-        'analitica_usuarios_' . date('Ymd_His'),
-        $export,
-        $columns,
-        $formattedrows
-    );
+    // XLSX export using a simple XML-based SpreadsheetML format.
+    $filename = 'analitica_usuarios_' . date('Ymd_His') . '.xlsx';
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Pragma: no-cache');
+
+    // Build SpreadsheetML XML.
+    $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+    $xml .= '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+        xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+        xmlns:x="urn:schemas-microsoft-com:office:excel">';
+    $xml .= '<Styles>';
+    $xml .= '<Style ss:ID="header"><Font ss:Bold="1"/><Interior ss:Color="#2D4FA4" ss:Pattern="Solid"/><Font ss:Color="#FFFFFF" ss:Bold="1"/></Style>';
+    $xml .= '</Styles>';
+    $xml .= '<Worksheet ss:Name="Analítica"><Table>';
+
+    foreach ($rows as $i => $row) {
+        $xml .= '<Row>';
+        foreach ($row as $cell) {
+            $style = ($i === 0) ? ' ss:StyleID="header"' : '';
+            $escaped = htmlspecialchars((string) $cell, ENT_XML1, 'UTF-8');
+            $xml .= "<Cell{$style}><Data ss:Type=\"String\">{$escaped}</Data></Cell>";
+        }
+        $xml .= '</Row>';
+    }
+
+    $xml .= '</Table></Worksheet></Workbook>';
+    echo $xml;
     exit;
 }
 
@@ -336,7 +361,7 @@ echo html_writer::end_tag('form');
 echo html_writer::start_div('aa-results-meta');
 echo html_writer::tag(
     'div',
-    'Mostrando ' . $from . '–' . $to . ' de ' . $userdata['total'] . ' registros',
+    'Mostrando ' . $from . '–' . $to . ' de ' . $userdata['total'] . ' estudiantes',
     ['class' => 'aa-results-count']
 );
 if ($userdata['total'] > $perpage) {
@@ -357,7 +382,7 @@ echo html_writer::tag('tr',
     html_writer::tag('th', 'Calificación media') .
     html_writer::tag('th', '% progreso') .
     html_writer::tag('th', 'Tiempo medio de sesión') .
-    html_writer::tag('th', 'Curso')
+    html_writer::tag('th', 'Curso/s inscritos')
 );
 echo html_writer::end_tag('thead');
 echo html_writer::start_tag('tbody');
